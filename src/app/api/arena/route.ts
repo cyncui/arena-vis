@@ -98,14 +98,8 @@ export async function GET(request: Request) {
     );
     const contents = await contentsRes.json();
 
-    const connectionsRes = await fetchWithRetry(
-      `https://api.are.na/v3/channels/${channel.id}/connections?per=100`
-    );
-    const connections = await connectionsRes.json();
-
     const items = contents.data || [];
     const blocks = items.filter((item: any) => item.base_type === 'Block');
-    const subChannels = items.filter((item: any) => item.type === 'Channel');
 
     if (blocks.length === 0) {
       return Response.json({ 
@@ -114,12 +108,11 @@ export async function GET(request: Request) {
     }
 
     const randomBlock = blocks[Math.floor(Math.random() * blocks.length)] as ArenaBlock;
-    const blockRes = await fetchWithRetry(`https://api.are.na/v3/blocks/${randomBlock.id}`);
+    const [blockRes, blockConnectionsRes] = await Promise.all([
+      fetchWithRetry(`https://api.are.na/v3/blocks/${randomBlock.id}`),
+      fetchWithRetry(`https://api.are.na/v3/blocks/${randomBlock.id}/connections?per=50`),
+    ]);
     const fullBlock = await blockRes.json();
-
-    const blockConnectionsRes = await fetchWithRetry(
-      `https://api.are.na/v3/blocks/${randomBlock.id}/connections?per=50`
-    );
     const blockConnections = await blockConnectionsRes.json();
 
     const nodes: GraphNode[] = [];
@@ -174,7 +167,6 @@ export async function GET(request: Request) {
     return Response.json({
       channel,
       block: fullBlock,
-      connectedChannels,
       graphData,
     });
   } catch (error) {
