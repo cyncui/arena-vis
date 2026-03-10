@@ -7,6 +7,15 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 export const metadata: Metadata = {
   title: "Asari",
   description: "A spatial interface for wandering through connected ideas.",
+  openGraph: {
+    title: "Asari",
+    description: "A spatial interface for wandering through connected ideas.",
+    images: [
+      {
+        url: "/images/opengraph.jpg",
+      },
+    ],
+  },
 };
 
 export default function RootLayout({
