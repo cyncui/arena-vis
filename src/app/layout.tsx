@@ -5,8 +5,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Arena 3D",
-  description: "3D visualization of are.na channels",
+  title: "Asari",
+  description: "A spatial interface for wandering through connected ideas.",
 };
 
 export default function RootLayout({
