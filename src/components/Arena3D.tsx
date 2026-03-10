@@ -13,7 +13,7 @@ function getThree() {
 const ForceGraph3D = dynamic(() => import('react-force-graph-3d'), {
   ssr: false,
   loading: () => (
-    <div className="flex flex-col items-center justify-center h-screen text-white gap-4">
+    <div className="flex flex-col items-center justify-center h-screen text-white gap-4 font-pixel">
       <div className="grid grid-cols-3 gap-1">
         {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
           <div
@@ -547,10 +547,10 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
             <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
               <button
                 onClick={() => setSidebarMinimized(m => !m)}
-                className="text-white/50 hover:text-white text-xs font-pixel uppercase flex items-center gap-1.5"
+                className="text-white/50 hover:text-white text-sm font-pixel uppercase flex items-center gap-1.5"
               >
                 <span className="inline-block transition-transform" style={{ transform: sidebarMinimized ? 'rotate(-90deg)' : 'rotate(0deg)' }}>▼</span>
-                {selectedNode.type === 'channel' ? '📁' : '📄'} {selectedNode.name.substring(0, 25)}{selectedNode.name.length > 25 ? '…' : ''}
+                {selectedNode.type === 'channel' ? '⁂' : '✴︎'} {selectedNode.name.substring(0, 25)}{selectedNode.name.length > 25 ? '…' : ''}
               </button>
            
             </div>
@@ -559,23 +559,23 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
               <>
                 {history.length > 0 && (
                   <div className="px-3 pt-2 pb-2 border-b border-white/10">
-                    <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1.5">Path</p>
+                    <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1.5 font-sans">Path</p>
                     <div className="flex flex-wrap gap-1 items-center">
                       {history.map((node, i) => (
                         <span key={`${node.id}-${i}`} className="flex items-center gap-1">
                           <button
                             onClick={() => jumpToHistory(i)}
-                            className="text-xs px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 transition-colors truncate max-w-[100px] font-pixel"
+                            className="text-sm px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 transition-colors truncate max-w-[100px] font-pixel"
                             style={{ color: node.type === 'channel' ? '#4ecdc4' : '#95e1d3' }}
                             title={node.name}
                           >
-                            {node.type === 'channel' ? '📁' : '📄'} {node.name.substring(0, 20)}{node.name.length > 20 ? '…' : ''}
+                            {node.type === 'channel' ? '⁂' : '✴︎'} {node.name.substring(0, 20)}{node.name.length > 20 ? '…' : ''}
                           </button>
                           <span className="text-white/20 text-[10px]">›</span>
                         </span>
                       ))}
-                      <span className="text-xs text-white/80 font-pixel truncate max-w-[200px]" title={selectedNode.name}>
-                        {selectedNode.type === 'channel' ? '📁' : '📄'} {selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}
+                      <span className="text-sm text-white/80 font-pixel truncate max-w-[200px]" title={selectedNode.name}>
+                        {selectedNode.type === 'channel' ? '⁂' : '✴︎'} {selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}
                       </span>
                     </div>
                   </div>
@@ -585,15 +585,15 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                   {history.length > 0 && (
                     <button
                       onClick={() => jumpToHistory(history.length - 1)}
-                      className="text-white/50 hover:text-white text-xs mb-2 flex items-center gap-1"
+                      className="text-white/50 hover:text-white text-[10px] mb-2 flex items-center gap-1 font-sans uppercase"
                     >
                       ← Back
                     </button>
                   )}
                   <h3 className="text-white font-bold mb-2 font-pixel uppercase">
-                    {selectedNode.type === 'channel' ? '📁 Channel' : '📄 Block'}
+                    {selectedNode.type === 'channel' ? '⁂ Channel' : '✴︎ Block'}
                   </h3>
-                  <p className="text-white/80 text-sm mb-2 font-pixel uppercase">{selectedNode.name}</p>
+                  {/* <p className="text-white/80 text-sm mb-2 font-pixel uppercase">{selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}</p> */}
 
                   {selectedNode.type === 'block' && selectedNode.blockData && (() => {
                     const block = selectedNode.blockData;
@@ -613,7 +613,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                         )}
                         {text && (
                           <>
-                            <p className="text-white/70 text-sm leading-relaxed font-pixel">
+                            <p className="text-white/70 text-sm leading-relaxed lowercase font-sans">
                               {text.substring(0, 400)}
                               {text.length > 400 ? '...' : ''}
                             </p>
@@ -621,16 +621,16 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                               href={blockUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="text-white/40 hover:text-white/70 text-xs font-pixel lowercase underline transition-colors inline-block"
+                              className="text-white/60 hover:text-white/70 text-sm font-pixel lowercase underline transition-colors inline-block"
                             >
                               view original on are.na
                             </a>
                           </>
                         )}
                     
-                        <p className="text-white/40 text-xs font-pixel lowercase">Type: {block.type}</p>
+                        <p className="text-white/40 text-sm font-pixel lowercase">Type: {block.type}</p>
                         {exploredBlocks.has(selectedNode.id) && (
-                          <p className="text-white/30 text-xs font-pixel italic mt-1">all connecting channels explored</p>
+                          <p className="text-white/30 text-sm font-pixel italic mt-1">all connecting channels explored</p>
                         )}
                       </div>
                     );
@@ -641,7 +641,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                       <p className="text-white/60 text-sm font-pixel">
                         {channelItemCount(selectedNode.channelData)} items
                       </p>
-                      <p className="text-white/40 text-xs font-pixel">
+                      <p className="text-white/40 text-sm font-pixel">
                         slug: {selectedNode.channelData.slug}
                       </p>
                     </div>
@@ -659,7 +659,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                       prevSelectedFgNodeRef.current = null;
                       setSelectedNode(null); setHistory([]); setSidebarMinimized(false);
                     }}
-                    className="text-white/30 hover:text-white/60 transition-colors text-xs font-pixel uppercase w-full text-center"
+                    className="text-white/30 hover:text-white/60 transition-colors text-sm font-pixel uppercase w-full text-center"
                   >
                     clear history
                   </button>
