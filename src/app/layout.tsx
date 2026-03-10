@@ -5,10 +5,10 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
 export const metadata: Metadata = {
-  title: "Asari",
+  title: "Kabo",
   description: "A spatial interface for wandering through connected ideas.",
   openGraph: {
-    title: "Asari",
+    title: "Kabo",
     description: "A spatial interface for wandering through connected ideas.",
     images: [
       {
