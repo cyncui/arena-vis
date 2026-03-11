@@ -126,6 +126,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const [slug, setSlug] = useState(initialSlug);
   const [exploredBlocks, setExploredBlocks] = useState<Set<string>>(new Set());
   const [sidebarMinimized, setSidebarMinimized] = useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [exploring, setExploring] = useState(false);
   const exploringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textureCache = useRef<Map<string, any>>(new Map());
@@ -543,7 +544,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         )}
 
         {selectedNode && (
-          <div className="w-80 bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
+          <div className="w-80 max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
             <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
               <button
                 onClick={() => setSidebarMinimized(m => !m)}
@@ -559,29 +560,37 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
               <>
                 {history.length > 0 && (
                   <div className="px-3 pt-2 pb-2 border-b border-white/10">
-                    <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1.5 font-sans">Path</p>
-                    <div className="flex flex-wrap gap-1 items-center">
-                      {history.map((node, i) => (
-                        <span key={`${node.id}-${i}`} className="flex items-center gap-1">
-                          <button
-                            onClick={() => jumpToHistory(i)}
-                            className="text-sm px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 transition-colors truncate max-w-[100px] font-pixel"
-                            style={{ color: node.type === 'channel' ? '#4ecdc4' : '#95e1d3' }}
-                            title={node.name}
-                          >
-                            {node.type === 'channel' ? '⁂' : '✴︎'} {node.name.substring(0, 20)}{node.name.length > 20 ? '…' : ''}
-                          </button>
-                          <span className="text-white/20 text-[10px]">›</span>
+                    <button
+                      onClick={() => setHistoryCollapsed(h => !h)}
+                      className="text-white/40 hover:text-white/60 text-[10px] uppercase tracking-wider mb-1.5 font-sans flex items-center gap-1 transition-colors"
+                    >
+                      <span className="inline-block transition-transform" style={{ transform: historyCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>▼</span>
+                      Path ({history.length})
+                    </button>
+                    {!historyCollapsed && (
+                      <div className="flex flex-wrap gap-1 items-center">
+                        {history.map((node, i) => (
+                          <span key={`${node.id}-${i}`} className="flex items-center gap-1">
+                            <button
+                              onClick={() => jumpToHistory(i)}
+                              className="text-sm px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 transition-colors truncate max-w-[100px] font-pixel"
+                              style={{ color: node.type === 'channel' ? '#4ecdc4' : '#95e1d3' }}
+                              title={node.name}
+                            >
+                              {node.type === 'channel' ? '⁂' : '✴︎'} {node.name.substring(0, 20)}{node.name.length > 20 ? '…' : ''}
+                            </button>
+                            <span className="text-white/20 text-[10px]">›</span>
+                          </span>
+                        ))}
+                        <span className="text-sm text-white/80 font-pixel truncate max-w-[200px]" title={selectedNode.name}>
+                          {selectedNode.type === 'channel' ? '⁂' : '✴︎'} {selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}
                         </span>
-                      ))}
-                      <span className="text-sm text-white/80 font-pixel truncate max-w-[200px]" title={selectedNode.name}>
-                        {selectedNode.type === 'channel' ? '⁂' : '✴︎'} {selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}
-                      </span>
-                    </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
-                <div className="p-4 max-h-[60vh] overflow-y-auto">
+                <div className="p-4">
                   {history.length > 0 && (
                     <button
                       onClick={() => jumpToHistory(history.length - 1)}
