@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
+import { Info } from '@geist-ui/icons';
 
 let _THREE: any = null;
 function getThree() {
@@ -128,6 +129,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const [sidebarMinimized, setSidebarMinimized] = useState(false);
   const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [exploring, setExploring] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState(false);
   const exploringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textureCache = useRef<Map<string, any>>(new Map());
   const keysPressed = useRef<Set<string>>(new Set());
@@ -142,7 +144,8 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
     const THREE = getThree();
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement).tagName === 'INPUT') return;
-      keysPressed.current.add(e.key.toLowerCase());
+      const key = e.key.toLowerCase();
+      keysPressed.current.add(key);
       if (e.key === 'Shift') {
         const controls = fgRef.current?.controls();
         if (controls) controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
@@ -165,24 +168,56 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
 
   useEffect(() => {
     let animId: number;
+    const THREE = getThree();
     const tick = () => {
       const fg = fgRef.current;
       if (!fg) { animId = requestAnimationFrame(tick); return; }
       const camera = fg.camera();
+      const controls = fg.controls();
       const keys = keysPressed.current;
       if (keys.size === 0) { animId = requestAnimationFrame(tick); return; }
 
-      const speed = keys.has('shift') ? 8 : 3;
-      const dir = camera.getWorldDirection(new (getThree().Vector3)());
+      const moveSpeed = keys.has('shift') ? 8 : 3;
+
+      const dir = camera.getWorldDirection(new THREE.Vector3());
       const right = dir.clone().cross(camera.up).normalize();
       const up = camera.up.clone().normalize();
 
-      if (keys.has('w')) camera.position.addScaledVector(dir, speed);
-      if (keys.has('s')) camera.position.addScaledVector(dir, -speed);
-      if (keys.has('a')) camera.position.addScaledVector(right, -speed);
-      if (keys.has('d')) camera.position.addScaledVector(right, speed);
-      if (keys.has('q')) camera.position.addScaledVector(up, -speed);
-      if (keys.has('e')) camera.position.addScaledVector(up, speed);
+      // Translation DOF via keyboard:
+      // - WASD: pan in screen space (left/right/up/down)
+      // - Q/E: dolly in/out along view direction
+      if (controls && (controls as any).target) {
+        const target = (controls as any).target as typeof camera.position;
+        const panOffset = new THREE.Vector3();
+        const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).normalize();
+        const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).normalize();
+
+        if (keys.has('a')) panOffset.addScaledVector(camRight, -moveSpeed);
+        if (keys.has('d')) panOffset.addScaledVector(camRight, moveSpeed);
+        if (keys.has('w')) panOffset.addScaledVector(camUp, moveSpeed);
+        if (keys.has('s')) panOffset.addScaledVector(camUp, -moveSpeed);
+
+        if (!panOffset.equals(new THREE.Vector3(0, 0, 0))) {
+          camera.position.add(panOffset);
+          target.add(panOffset);
+        }
+
+        if (keys.has('q') || keys.has('e')) {
+          const dollyDir = camera.getWorldDirection(new THREE.Vector3());
+          const dollyAmount = keys.has('q') ? -moveSpeed : moveSpeed;
+          const dollyOffset = dollyDir.multiplyScalar(dollyAmount);
+          camera.position.add(dollyOffset);
+          target.add(dollyOffset);
+        }
+      } else {
+        // Fallback if controls/target are unavailable: move camera in local axes
+        if (keys.has('w')) camera.position.addScaledVector(up, moveSpeed);
+        if (keys.has('s')) camera.position.addScaledVector(up, -moveSpeed);
+        if (keys.has('a')) camera.position.addScaledVector(right, -moveSpeed);
+        if (keys.has('d')) camera.position.addScaledVector(right, moveSpeed);
+        if (keys.has('q')) camera.position.addScaledVector(dir, -moveSpeed);
+        if (keys.has('e')) camera.position.addScaledVector(dir, moveSpeed);
+      }
 
       animId = requestAnimationFrame(tick);
     };
@@ -525,11 +560,11 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder="Enter Are.na URL"
-            className="px-4 py-2 w-80 bg-black/50 border border-white/20 rounded-md text-white placeholder-white/50 focus:outline-none focus:border-white/50 backdrop-blur-sm font-pixel"
+            className="px-3 py-1 w-80 bg-black/50 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-white/50 backdrop-blur-sm font-pixel"
           />
           <button
             type="submit"
-            className="px-4 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-md text-white backdrop-blur-sm transition-colors font-pixel uppercase"
+            className="px-3 py-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white backdrop-blur-sm transition-colors font-pixel uppercase"
           >
             Explore
           </button>
@@ -609,6 +644,11 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                     const imgSrc = block.image?.medium?.src || block.image?.small?.src || block.image?.src;
                     const text = getContentText(block);
                     const blockUrl = `https://www.are.na/block/${block.id}`;
+                    const rich =
+                      block.content && typeof block.content !== 'string'
+                        ? (block.content as any).html
+                        : null;
+
                     return (
                       <div className="space-y-3">
                         {imgSrc && (
@@ -620,26 +660,36 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                             />
                           </a>
                         )}
-                        {text && (
-                          <>
+
+                        {rich ? (
+                          <div
+                            className="text-white/70 text-sm leading-relaxed lowercase font-sans space-y-2"
+                            dangerouslySetInnerHTML={{ __html: rich }}
+                          />
+                        ) : (
+                          text && (
                             <p className="text-white/70 text-sm leading-relaxed lowercase font-sans">
-                              {text.substring(0, 400)}
-                              {text.length > 400 ? '...' : ''}
+                              {text}
                             </p>
-                            <a
-                              href={blockUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-white/60 hover:text-white/70 text-sm font-pixel lowercase underline transition-colors inline-block"
-                            >
-                              view original on are.na
-                            </a>
-                          </>
+                          )
                         )}
-                    
+
+                        {(rich || text) && (
+                          <a
+                            href={blockUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-white/60 hover:text-white/70 text-sm font-pixel lowercase underline transition-colors inline-block"
+                          >
+                            view original on are.na
+                          </a>
+                        )}
+
                         <p className="text-white/40 text-sm font-pixel lowercase">Type: {block.type}</p>
                         {exploredBlocks.has(selectedNode.id) && (
-                          <p className="text-white/30 text-sm font-pixel italic mt-1">all connecting channels explored</p>
+                          <p className="text-white/30 text-sm font-pixel italic mt-1">
+                            all connecting channels explored
+                          </p>
                         )}
                       </div>
                     );
@@ -679,6 +729,57 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         )}
       </div>
 
+      <div className="absolute top-4 right-4 z-10 flex flex-col items-end gap-2">
+        <button
+          type="button"
+          onClick={() => setControlsOpen((open) => !open)}
+          className="flex items-center gap-1 px-3 py-1.5 bg-black/50 hover:bg-black/70 border border-white/20 text-white text-xs font-pixel uppercase backdrop-blur-sm transition-colors"
+        >
+          <Info size={14} />
+          Controls
+        </button>
+
+        {controlsOpen && (
+          <div className="w-80 max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
+            <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
+              <div className="text-white/70 text-xs font-pixel uppercase tracking-wide">
+                Controls
+              </div>
+              <button
+                type="button"
+                onClick={() => setControlsOpen(false)}
+                className="text-white/40 hover:text-white/80 text-xs font-pixel uppercase tracking-wide"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4 text-xs">
+              <div>
+                <p className="text-white/60 font-pixel uppercase mb-1">Mouse</p>
+                <p className="text-white/70 font-sans lowercase">
+                  drag to rotate • shift-drag or right-drag to pan • scroll to zoom
+                </p>
+              </div>
+              <div>
+                <p className="text-white/60 font-pixel uppercase mb-1">Keyboard movement</p>
+                <p className="text-white/70 font-sans lowercase">
+                  wasd: pan the view in screen space • q / e: zoom in / out along view
+                </p>
+              </div>
+              <div>
+                <p className="text-white/40 text-[10px] font-pixel uppercase tracking-wide">
+                  tip
+                </p>
+                <p className="text-white/50 text-[11px] font-sans lowercase">
+                  hold shift while using keys to move and rotate faster.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
       {!loading && graphData && (
         <ForceGraph3D
           ref={fgRef}
@@ -709,10 +810,6 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
           ))}
         </div>
       )}
-
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 text-white/40 font-pixel text-center">
-        <p>Drag to rotate ✴︎ Shift-drag or right-drag to pan ✴︎ Scroll to zoom</p>
-      </div>
     </div>
   );
 }
