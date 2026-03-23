@@ -31,6 +31,101 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
+@keyframes star-float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes star-glow {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+.star {
+  animation: star-float var(--float-dur, 4s) ease-in-out infinite,
+             star-glow var(--glow-dur, 3s) ease-in-out infinite;
+  animation-delay: var(--float-delay, 0s), var(--glow-delay, 0s);
+  will-change: transform, opacity;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.6),
+               0 0 12px rgba(200, 210, 255, 0.3);
+}
+
+/* Expand hit area to minimum 40x40px */
+.star::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  min-width: 40px;
+  min-height: 40px;
+}
+
+.star:hover {
+  animation-play-state: paused;
+  text-shadow: 0 0 6px rgba(255, 255, 255, 0.9),
+               0 0 18px rgba(200, 210, 255, 0.5),
+               0 0 30px rgba(180, 200, 255, 0.2);
+}
+
+/* Staggered entrance animations */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in-up {
+  opacity: 0;
+  animation: fade-in-up 0.6s cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+.animate-fade-in {
+  opacity: 0;
+  animation: fade-in 0.8s cubic-bezier(0.2, 0, 0, 1) forwards;
+}
+
+/* Landing page */
+.landing-page {
+  background: url('/images/background.png') center / cover;
+  background-color: #000;
+}
+
+.landing-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 1;
+}
+
+.landing-title {
+  font-family: var(--font-pixel);
+}
+
+.landing-subtitle {
+  animation-delay: 100ms;
+}
+
+.landing-cta {
+  font-family: var(--font-pixel);
+  animation-delay: 200ms;
+}
+
+.landing-constellation {
+  animation-delay: 300ms;
+}
+
 body {
   color: rgb(var(--foreground-rgb));
   background: linear-gradient(

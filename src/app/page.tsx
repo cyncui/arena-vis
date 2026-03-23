@@ -1,12 +1,5 @@
-import Arena3D from '@/components/Arena3D';
+import LandingPage from '@/components/LandingPage';
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{ slug?: string }>;
-}) {
-  const params = await searchParams;
-  const slug = params.slug || '';
-
-  return <Arena3D initialSlug={slug} />;
+export default function Home() {
+  return <LandingPage />;
 }

@@ -69,6 +69,7 @@ interface GraphNode {
   blockData?: ArenaBlock;
   channelData?: ArenaChannel;
   imageUrl?: string;
+  previewUrl?: string;
 }
 
 interface GraphLink {
@@ -289,36 +290,85 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
     }
   }, []);
 
+  const fetchUserData = useCallback(async (username: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/user?username=${encodeURIComponent(username)}`);
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || 'Failed to fetch user data');
+        setGraphData(null);
+        return;
+      }
+
+      setGraphData(data.graphData);
+      setSelectedNode(null);
+      setHistory([]);
+      setExploredBlocks(new Set());
+    } catch (err) {
+      setError('Failed to fetch user data');
+      setGraphData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
     if (initialSlug) {
-      fetchData(initialSlug);
+      if (initialSlug.startsWith('@')) {
+        fetchUserData(initialSlug.slice(1));
+      } else {
+        fetchData(initialSlug);
+      }
     }
-  }, [initialSlug, fetchData]);
+  }, [initialSlug, fetchData, fetchUserData]);
 
-  const extractSlug = (input: string): string => {
+  const extractInput = (input: string): { type: 'channel' | 'user'; value: string } => {
     const trimmed = input.trim();
+
+    // Handle @username shorthand
+    if (trimmed.startsWith('@')) {
+      return { type: 'user', value: trimmed.slice(1) };
+    }
+
     try {
       const url = new URL(trimmed);
       if (url.hostname.endsWith('are.na')) {
         const segments = url.pathname.split('/').filter(Boolean);
-        return segments[segments.length - 1] || '';
+        if (segments.length === 1) {
+          // are.na/username — profile URL
+          return { type: 'user', value: segments[0] };
+        }
+        if (segments.length === 2 && segments[1] === 'channels') {
+          // are.na/username/channels — profile channels page
+          return { type: 'user', value: segments[0] };
+        }
+        // are.na/username/channel-slug — channel URL
+        return { type: 'channel', value: segments[segments.length - 1] || '' };
       }
     } catch {
-      // not a URL — treat as a raw slug
+      // not a URL — treat as a raw channel slug
     }
-    return trimmed.replace(/^-/, '');
+    return { type: 'channel', value: trimmed.replace(/^-/, '') };
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const newSlug = extractSlug(slug);
-    if (newSlug) {
-      router.push(`/?slug=${encodeURIComponent(newSlug)}`);
-      fetchData(newSlug);
+    const parsed = extractInput(slug);
+    if (!parsed.value) return;
+
+    if (parsed.type === 'user') {
+      router.push(`/explore?slug=${encodeURIComponent('@' + parsed.value)}`);
+      fetchUserData(parsed.value);
+    } else {
+      router.push(`/explore?slug=${encodeURIComponent(parsed.value)}`);
+      fetchData(parsed.value);
     }
   };
 
@@ -427,14 +477,62 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
     }
   }, [selectNode]);
 
+  const handleNodeRightClick = useCallback((node: any, event: MouseEvent) => {
+    event.preventDefault();
+    const graphNode = node as GraphNode;
+
+    setGraphData(prev => {
+      if (!prev) return prev;
+
+      // Find parent IDs (nodes that link TO this node)
+      const parentIds = new Set<string>();
+      for (const link of prev.links) {
+        const target = typeof link.target === 'object' ? (link.target as any).id : link.target;
+        const source = typeof link.source === 'object' ? (link.source as any).id : link.source;
+        if (target === graphNode.id) parentIds.add(source);
+      }
+
+      // BFS to collect all descendants (excluding parents)
+      const toRemove = new Set<string>([graphNode.id]);
+      const queue = [graphNode.id];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const link of prev.links) {
+          const source = typeof link.source === 'object' ? (link.source as any).id : link.source;
+          const target = typeof link.target === 'object' ? (link.target as any).id : link.target;
+          // Follow links outward from current, but don't traverse back to parents of the original node
+          if (source === current && !toRemove.has(target) && !parentIds.has(target)) {
+            toRemove.add(target);
+            queue.push(target);
+          }
+          if (target === current && !toRemove.has(source) && !parentIds.has(source)) {
+            toRemove.add(source);
+            queue.push(source);
+          }
+        }
+      }
+
+      return {
+        nodes: prev.nodes.filter(n => !toRemove.has(n.id)),
+        links: prev.links.filter(l => {
+          const s = typeof l.source === 'object' ? (l.source as any).id : l.source;
+          const t = typeof l.target === 'object' ? (l.target as any).id : l.target;
+          return !toRemove.has(s) && !toRemove.has(t);
+        }),
+      };
+    });
+
+    // Clear selection if the removed node was selected
+    if (selectedNode?.id === graphNode.id) {
+      setSelectedNode(null);
+    }
+  }, [selectedNode]);
+
   const handleNodeHover = useCallback((node: any, prevNode: any) => {
     if (prevNode?.__threeObj) {
       prevNode.__threeObj.traverse((child: any) => {
         if (child.material && child.material.opacity !== undefined) {
           child.material.opacity = 0.5;
-        }
-        if (child.userData?.isBracket) {
-          child.visible = false;
         }
       });
     }
@@ -442,9 +540,6 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
       node.__threeObj.traverse((child: any) => {
         if (child.material && child.material.opacity !== undefined) {
           child.material.opacity = 1.0;
-        }
-        if (child.userData?.isBracket) {
-          child.visible = true;
         }
       });
     }
@@ -459,7 +554,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
       const group = new THREE.Group();
 
       const geo = new THREE.SphereGeometry(r, 24, 24);
-      const mat = new THREE.MeshPhysicalMaterial({
+      const matOptions: any = {
         color: 0xffffff,
         emissive: 0xffffff,
         emissiveIntensity: 0.15,
@@ -470,13 +565,26 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         reflectivity: 1.0,
         transparent: false,
         opacity: 0.5,
-      });
+      };
+
+      if (graphNode.previewUrl) {
+        let texture = textureCache.current.get(graphNode.previewUrl);
+        if (!texture) {
+          const loader = new THREE.TextureLoader();
+          texture = loader.load(graphNode.previewUrl);
+          textureCache.current.set(graphNode.previewUrl, texture);
+        }
+        matOptions.map = texture;
+        matOptions.emissiveIntensity = 0.05;
+      }
+
+      const mat = new THREE.MeshPhysicalMaterial(matOptions);
       group.add(new THREE.Mesh(geo, mat));
 
+      // Brackets always visible to distinguish channels from blocks
       const bracketGeo = new THREE.BufferGeometry();
       bracketGeo.setAttribute('position', new THREE.BufferAttribute(createBracketVertices(r), 3));
       const brackets = new THREE.LineSegments(bracketGeo, new THREE.LineBasicMaterial({ color: 0xffffff }));
-      brackets.visible = false;
       brackets.userData.isBracket = true;
       group.add(brackets);
 
@@ -504,6 +612,9 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         new THREE.EdgesGeometry(planeGeo),
         new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.5, transparent: true })
       ));
+      group.onBeforeRender = (_renderer: any, _scene: any, camera: any) => {
+        group.quaternion.copy(camera.quaternion);
+      };
       return group;
     }
 
@@ -552,14 +663,18 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
     ch.counts?.contents ?? ch.length ?? '?';
 
   return (
-    <div className="relative w-full h-screen">
-      <div className="absolute top-4 left-4 z-10 flex flex-col gap-2">
-        <form onSubmit={handleSubmit} className="flex gap-2">
+    <div className="relative w-full h-screen" onContextMenu={(e) => e.preventDefault()}>
+      <div className={`absolute z-10 flex flex-col gap-2 transition-all duration-700 ease-in-out ${
+        graphData || loading ? 'top-4 left-4' : 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
+      }`}>
+        <form onSubmit={handleSubmit} className={`flex gap-2 transition-transform duration-700 ${
+          graphData || loading ? '' : 'scale-110'
+        }`}>
           <input
             type="text"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
-            placeholder="Enter Are.na URL"
+            placeholder="Enter Are.na channel or profile URL"
             className="px-3 py-1 w-80 bg-black/50 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-white/50 backdrop-blur-sm font-pixel"
           />
           <button
@@ -792,6 +907,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
           linkOpacity={0.5}
           backgroundColor="#0a0a0a"
           onNodeClick={handleNodeClick}
+          onNodeRightClick={handleNodeRightClick}
           onNodeHover={handleNodeHover}
           controlType="orbit"
           enablePointerInteraction={true}

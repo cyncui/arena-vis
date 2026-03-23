@@ -36,6 +36,7 @@ interface GraphNode {
   blockData?: any;
   channelData?: any;
   imageUrl?: string;
+  previewUrl?: string;
 }
 
 interface GraphLink {
@@ -126,12 +127,15 @@ export async function GET(request: Request) {
     const links: GraphLink[] = [];
 
     const rootChannelId = `channel-${channel.id}`;
+    const previewBlock = blocks.find((b: any) => b.image?.small?.src || b.image?.src);
+    const rootPreviewUrl = previewBlock?.image?.small?.src || previewBlock?.image?.src || undefined;
     nodes.push({
       id: rootChannelId,
       name: channel.title || channel.slug,
       type: 'channel',
       val: 30,
       channelData: channel,
+      previewUrl: rootPreviewUrl,
     });
 
     for (const block of randomBlocks) {
