@@ -607,14 +607,15 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         opacity: 0.5,
       });
       const planeGeo = new THREE.PlaneGeometry(size, size);
-      group.add(new THREE.Mesh(planeGeo, planeMat));
+      const mesh = new THREE.Mesh(planeGeo, planeMat);
+      mesh.onBeforeRender = (_renderer: any, _scene: any, camera: any) => {
+        group.quaternion.copy(camera.quaternion);
+      };
+      group.add(mesh);
       group.add(new THREE.LineSegments(
         new THREE.EdgesGeometry(planeGeo),
         new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.5, transparent: true })
       ));
-      group.onBeforeRender = (_renderer: any, _scene: any, camera: any) => {
-        group.quaternion.copy(camera.quaternion);
-      };
       return group;
     }
 
