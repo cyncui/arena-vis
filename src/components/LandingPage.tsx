@@ -5,7 +5,7 @@ import ConstellationCanvas from './ConstellationCanvas';
 
 export default function LandingPage() {
   return (
-    <div className="landing-page relative w-screen h-screen overflow-hidden">
+    <div className="landing-page relative w-full h-[100dvh] overflow-hidden">
       <div className="relative z-10 flex h-full">
         {/* Left panel */}
         <div className="flex flex-col justify-center px-10 md:px-16 w-full md:w-[45%]">
@@ -14,7 +14,7 @@ export default function LandingPage() {
             <span className="text-5xl md:text-7xl">花望</span>
           </h1>
 
-          <p className="landing-subtitle text-white/70 text-base md:text-lg leading-relaxed max-w-md mb-12 font-light font-[family-name:var(--font-inter)] animate-fade-in-up [text-wrap:pretty]">
+          <p className="landing-subtitle text-white/70 text-base md:text-lg leading-relaxed max-w-md mb-12 font-light font-sans animate-fade-in-up [text-wrap:pretty]">
             let your research be calm and intentional by drifting through your
             channels
           </p>

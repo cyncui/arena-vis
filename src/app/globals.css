@@ -3,14 +3,47 @@
 @tailwind utilities;
 
 @font-face {
+  font-family: 'Open Runde';
+  src: url('/fonts/OpenRunde-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Open Runde';
+  src: url('/fonts/OpenRunde-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Open Runde';
+  src: url('/fonts/OpenRunde-Semibold.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Open Runde';
+  src: url('/fonts/OpenRunde-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
   font-family: 'PixelOperator';
   src: url('/fonts/PixelOperator.woff2') format('woff2');
-  font-weight: normal;
+  font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
 :root {
+  --font-sans: 'Open Runde', ui-sans-serif, system-ui, sans-serif;
   --font-pixel: 'PixelOperator', monospace;
   --foreground-rgb: 255, 255, 255;
   --background-start-rgb: 10, 10, 10;
@@ -31,23 +64,8 @@
   background: rgba(255, 255, 255, 0.3);
 }
 
-@keyframes star-float {
-  0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-6px); }
-}
-
-@keyframes star-glow {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
-}
-
 .star {
-  animation: star-float var(--float-dur, 4s) ease-in-out infinite,
-             star-glow var(--glow-dur, 3s) ease-in-out infinite;
-  animation-delay: var(--float-delay, 0s), var(--glow-delay, 0s);
-  will-change: transform, opacity;
-  text-shadow: 0 0 4px rgba(255, 255, 255, 0.6),
-               0 0 12px rgba(200, 210, 255, 0.3);
+  text-shadow: 0 0 5px rgba(220, 212, 255, 0.45);
 }
 
 /* Expand hit area to minimum 40x40px */
@@ -62,7 +80,6 @@
 }
 
 .star:hover {
-  animation-play-state: paused;
   text-shadow: 0 0 6px rgba(255, 255, 255, 0.9),
                0 0 18px rgba(200, 210, 255, 0.5),
                0 0 30px rgba(180, 200, 255, 0.2);
@@ -97,15 +114,23 @@
 
 /* Landing page */
 .landing-page {
-  background: url('/images/background.png') center / cover;
-  background-color: #000;
+  background:
+    radial-gradient(ellipse at 77% 57%, rgba(104, 82, 139, 0.16), transparent 44%),
+    radial-gradient(ellipse at 64% 38%, rgba(59, 82, 125, 0.2), transparent 48%),
+    #070910;
 }
 
 .landing-page::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background-image:
+    radial-gradient(1px 1px at 17px 29px, #9d96b7 95%, transparent),
+    radial-gradient(1px 1px at 89px 113px, #bfb8a8 95%, transparent),
+    radial-gradient(1px 1px at 157px 71px, #707d9b 95%, transparent);
+  background-size: 233px 197px, 337px 293px, 419px 347px;
+  opacity: 0.5;
+  pointer-events: none;
   z-index: 1;
 }
 
@@ -137,4 +162,18 @@ body {
   margin: 0;
   padding: 0;
   overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in-up,
+  .animate-fade-in,
+  .animate-pulse {
+    animation: none;
+    opacity: 1;
+  }
+
+  .star,
+  .landing-cta {
+    transition: none;
+  }
 }

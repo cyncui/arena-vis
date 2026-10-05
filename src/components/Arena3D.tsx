@@ -1,15 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
-import { Info } from '@geist-ui/icons';
+import InterfaceIcon from './InterfaceIcon';
+import NavigationGuide from './NavigationGuide';
+import HandControlsPanel from './HandControlsPanel';
+import { applyHandMotion, pickHandNode, type HandGraphHit, type HandGraphControls } from '@/lib/hand-controls/graph-adapter';
+import type { HandOutput } from '@/lib/hand-controls/types';
+import { HoverSelectionController } from '@/lib/hand-controls/hover-selection';
 
-let _THREE: any = null;
-function getThree() {
-  if (!_THREE) _THREE = require('three');
-  return _THREE;
-}
+import * as THREE from 'three';
 
 const ForceGraph3D = dynamic(() => import('react-force-graph-3d'), {
   ssr: false,
@@ -73,8 +74,8 @@ interface GraphNode {
 }
 
 interface GraphLink {
-  source: string;
-  target: string;
+  source: string | GraphNode;
+  target: string | GraphNode;
 }
 
 interface GraphData {
@@ -92,10 +93,26 @@ function getContentText(block: ArenaBlock): string | null {
   return block.content.plain || null;
 }
 
-function getLinkKey(link: any): string {
+function getLinkKey(link: GraphLink): string {
   const s = typeof link.source === 'object' ? link.source.id : link.source;
   const t = typeof link.target === 'object' ? link.target.id : link.target;
   return `${s}__${t}`;
+}
+
+const clusterPalette = ['#b8a7d4', '#8fb7b0', '#cfb38e', '#a4afc9'];
+const selectedParticleColor = '#fff0cf';
+
+function hashId(id: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < id.length; i++) hash = Math.imul(hash ^ id.charCodeAt(i), 16777619);
+  return hash >>> 0;
+}
+
+function setParticleColor(node: any, color: string) {
+  const object = node?.__threeObj || node;
+  object?.traverse?.((child: any) => {
+    if (child.userData.isParticle || child.userData.isImageEdge) child.material.color.set(color);
+  });
 }
 
 function createBracketVertices(r: number): Float32Array {
@@ -120,6 +137,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const fgRef = useRef<any>(null);
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
+  const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(!!initialSlug);
   const [error, setError] = useState<string | null>(null);
@@ -128,29 +146,96 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const [slug, setSlug] = useState(initialSlug);
   const [exploredBlocks, setExploredBlocks] = useState<Set<string>>(new Set());
   const [sidebarMinimized, setSidebarMinimized] = useState(false);
-  const [historyCollapsed, setHistoryCollapsed] = useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = useState(true);
   const [exploring, setExploring] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [handHoveredNodeName, setHandHoveredNodeName] = useState<string | null>(null);
+  const handHoverRef = useRef<HandGraphHit | null>(null);
+  const handHoverSelectionRef = useRef(new HoverSelectionController());
+  const handHoverProgressRef = useRef(0);
+  const handCameraControlsRef = useRef<{ controls: HandGraphControls; enabled: boolean; damping: boolean } | null>(null);
+  const [randomState, setRandomState] = useState<'idle' | 'loading'>('idle');
   const exploringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textureCache = useRef<Map<string, any>>(new Map());
   const keysPressed = useRef<Set<string>>(new Set());
   const selectedNodeRef = useRef<GraphNode | null>(null);
   const prevSelectedFgNodeRef = useRef<any>(null);
   const graphDataRef = useRef<GraphData | null>(null);
+  const nodeColors = useMemo(() => {
+    const colors = new Map<string, string>();
+    if (!graphData) return colors;
+    const channels = new Set(graphData.nodes.filter(node => node.type === 'channel').map(node => node.id));
+    for (const id of channels) colors.set(id, clusterPalette[hashId(id) % clusterPalette.length]);
+    const owners = new Map<string, string>();
+    for (const link of graphData.links) {
+      const source = typeof link.source === 'object' ? link.source.id : link.source;
+      const target = typeof link.target === 'object' ? link.target.id : link.target;
+      for (const [channel, block] of [[source, target], [target, source]]) {
+        if (!channels.has(channel) || channels.has(block)) continue;
+        const owner = owners.get(block);
+        if (!owner || channel < owner) owners.set(block, channel);
+      }
+    }
+    for (const node of graphData.nodes) {
+      if (!colors.has(node.id)) colors.set(node.id, colors.get(owners.get(node.id) || '') || clusterPalette[0]);
+    }
+    return colors;
+  }, [graphData]);
+  const nodeColorsRef = useRef(nodeColors);
+  nodeColorsRef.current = nodeColors;
+
+  useEffect(() => {
+    for (const node of graphData?.nodes || []) {
+      setParticleColor(node, node.id === selectedNode?.id || node.id === handHoverRef.current?.id ? selectedParticleColor : nodeColors.get(node.id) || clusterPalette[0]);
+    }
+  }, [graphData, nodeColors, selectedNode]);
 
   useEffect(() => { selectedNodeRef.current = selectedNode; }, [selectedNode]);
   useEffect(() => { graphDataRef.current = graphData; }, [graphData]);
 
   useEffect(() => {
-    const THREE = getThree();
+    let animId: number | null = null;
+    const movementKeys = new Set(['w', 'a', 's', 'd', 'q', 'e']);
+    const direction = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    const offset = new THREE.Vector3();
+    const hasMovement = () => [...keysPressed.current].some(key => movementKeys.has(key));
+    const tick = () => {
+      animId = null;
+      if (!hasMovement()) return;
+      const fg = fgRef.current;
+      if (fg) {
+        const camera = fg.camera();
+        const controls = fg.controls();
+        const keys = keysPressed.current;
+        const speed = keys.has('shift') ? 8 : 3;
+        camera.getWorldDirection(direction);
+        right.setFromMatrixColumn(camera.matrix, 0).normalize();
+        up.setFromMatrixColumn(camera.matrix, 1).normalize();
+        offset.set(0, 0, 0);
+        if (keys.has('a')) offset.addScaledVector(right, -speed);
+        if (keys.has('d')) offset.addScaledVector(right, speed);
+        if (keys.has('w')) offset.addScaledVector(up, speed);
+        if (keys.has('s')) offset.addScaledVector(up, -speed);
+        if (keys.has('q')) offset.addScaledVector(direction, -speed);
+        if (keys.has('e')) offset.addScaledVector(direction, speed);
+        camera.position.add(offset);
+        controls?.target?.add(offset);
+      }
+      animId = requestAnimationFrame(tick);
+    };
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
       const key = e.key.toLowerCase();
+      if (!movementKeys.has(key) && key !== 'shift') return;
       keysPressed.current.add(key);
-      if (e.key === 'Shift') {
+      if (key === 'shift') {
         const controls = fgRef.current?.controls();
         if (controls) controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
       }
+      if (movementKeys.has(key) && animId === null) animId = requestAnimationFrame(tick);
     };
     const onKeyUp = (e: KeyboardEvent) => {
       keysPressed.current.delete(e.key.toLowerCase());
@@ -158,111 +243,92 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         const controls = fgRef.current?.controls();
         if (controls) controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
       }
+      if (!hasMovement() && animId !== null) {
+        cancelAnimationFrame(animId);
+        animId = null;
+      }
+    };
+    const onBlur = () => {
+      keysPressed.current.clear();
+      if (animId !== null) cancelAnimationFrame(animId);
+      animId = null;
+      const controls = fgRef.current?.controls();
+      if (controls) controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
     };
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onBlur);
     return () => {
+      onBlur();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onBlur);
     };
   }, []);
 
   useEffect(() => {
-    let animId: number;
-    const THREE = getThree();
-    const tick = () => {
-      const fg = fgRef.current;
-      if (!fg) { animId = requestAnimationFrame(tick); return; }
-      const camera = fg.camera();
-      const controls = fg.controls();
-      const keys = keysPressed.current;
-      if (keys.size === 0) { animId = requestAnimationFrame(tick); return; }
-
-      const moveSpeed = keys.has('shift') ? 8 : 3;
-
-      const dir = camera.getWorldDirection(new THREE.Vector3());
-      const right = dir.clone().cross(camera.up).normalize();
-      const up = camera.up.clone().normalize();
-
-      // Translation DOF via keyboard:
-      // - WASD: pan in screen space (left/right/up/down)
-      // - Q/E: dolly in/out along view direction
-      if (controls && (controls as any).target) {
-        const target = (controls as any).target as typeof camera.position;
-        const panOffset = new THREE.Vector3();
-        const camRight = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 0).normalize();
-        const camUp = new THREE.Vector3().setFromMatrixColumn(camera.matrix, 1).normalize();
-
-        if (keys.has('a')) panOffset.addScaledVector(camRight, -moveSpeed);
-        if (keys.has('d')) panOffset.addScaledVector(camRight, moveSpeed);
-        if (keys.has('w')) panOffset.addScaledVector(camUp, moveSpeed);
-        if (keys.has('s')) panOffset.addScaledVector(camUp, -moveSpeed);
-
-        if (!panOffset.equals(new THREE.Vector3(0, 0, 0))) {
-          camera.position.add(panOffset);
-          target.add(panOffset);
-        }
-
-        if (keys.has('q') || keys.has('e')) {
-          const dollyDir = camera.getWorldDirection(new THREE.Vector3());
-          const dollyAmount = keys.has('q') ? -moveSpeed : moveSpeed;
-          const dollyOffset = dollyDir.multiplyScalar(dollyAmount);
-          camera.position.add(dollyOffset);
-          target.add(dollyOffset);
-        }
-      } else {
-        // Fallback if controls/target are unavailable: move camera in local axes
-        if (keys.has('w')) camera.position.addScaledVector(up, moveSpeed);
-        if (keys.has('s')) camera.position.addScaledVector(up, -moveSpeed);
-        if (keys.has('a')) camera.position.addScaledVector(right, -moveSpeed);
-        if (keys.has('d')) camera.position.addScaledVector(right, moveSpeed);
-        if (keys.has('q')) camera.position.addScaledVector(dir, -moveSpeed);
-        if (keys.has('e')) camera.position.addScaledVector(dir, moveSpeed);
-      }
-
-      animId = requestAnimationFrame(tick);
-    };
-    animId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animId);
-  }, []);
-
-  const starredScenes = useRef<WeakSet<object>>(new WeakSet());
-  useEffect(() => {
-    const interval = setInterval(() => {
+    const onVisibilityChange = () => {
       const fg = fgRef.current;
       if (!fg) return;
-      const scene = fg.scene();
-      if (!scene || starredScenes.current.has(scene)) return;
-      starredScenes.current.add(scene);
-      clearInterval(interval);
+      if (document.hidden) fg.pauseAnimation();
+      else fg.resumeAnimation();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
 
-      const THREE = getThree();
-      const count = 2000;
-      const positions = new Float32Array(count * 3);
-      const spread = 3000;
-
-      for (let i = 0; i < count; i++) {
-        positions[i * 3] = (Math.random() - 0.5) * spread;
-        positions[i * 3 + 1] = (Math.random() - 0.5) * spread;
-        positions[i * 3 + 2] = (Math.random() - 0.5) * spread;
+  const galaxyCleanup = useRef<(() => void) | null>(null);
+  const attachGraph = useCallback((fg: any) => {
+    galaxyCleanup.current?.();
+    galaxyCleanup.current = null;
+    fgRef.current = fg;
+    if (!fg) return;
+    if (document.hidden) fg.pauseAnimation();
+    const scene = fg.scene();
+    const count = 350;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    let seed = 731;
+    const random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+    const color = new THREE.Color();
+    for (let i = 0; i < count; i++) {
+      if (i < 260) {
+        const radius = 250 + Math.sqrt(random()) * 1700;
+        const angle = radius * 0.003 + (i % 3) * Math.PI * 2 / 3 + (random() - 0.5) * 0.55;
+        positions[i * 3] = Math.cos(angle) * radius;
+        positions[i * 3 + 1] = (random() - 0.5) * 150 - radius * 0.18;
+        positions[i * 3 + 2] = Math.sin(angle) * radius;
+      } else {
+        const angle = random() * Math.PI * 2;
+        const height = random() * 2 - 1;
+        const radius = 2300 + random() * 1000;
+        const ring = Math.sqrt(1 - height * height) * radius;
+        positions[i * 3] = Math.cos(angle) * ring;
+        positions[i * 3 + 1] = height * radius;
+        positions[i * 3 + 2] = Math.sin(angle) * ring;
       }
-
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-
-      const mat = new THREE.PointsMaterial({
-        color: 0xffffff,
-        size: 2,
-        sizeAttenuation: false,
-        transparent: true,
-        opacity: 0.25,
-        depthWrite: false,
-      });
-
-      scene.add(new THREE.Points(geo, mat));
-    }, 200);
-    return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+      color.set(i % 5 === 0 ? '#aaa8cf' : '#ded8cb').multiplyScalar(0.12 + random() * 0.16);
+      color.toArray(colors, i * 3);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    const material = new THREE.PointsMaterial({
+      size: 0.9,
+      sizeAttenuation: false,
+      vertexColors: true,
+      depthWrite: false,
+    });
+    const galaxy = new THREE.Points(geometry, material);
+    scene.add(galaxy);
+    galaxyCleanup.current = () => {
+      scene.remove(galaxy);
+      geometry.dispose();
+      material.dispose();
+    };
   }, []);
 
   const fetchData = useCallback(async (channelSlug: string) => {
@@ -316,7 +382,13 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   }, []);
 
   useEffect(() => {
+    const updateViewport = () => {
+      setViewport({ width: window.innerWidth, height: window.innerHeight });
+    };
+    updateViewport();
     setMounted(true);
+    window.addEventListener('resize', updateViewport);
+    return () => window.removeEventListener('resize', updateViewport);
   }, []);
 
   useEffect(() => {
@@ -360,20 +432,50 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (randomState === 'loading' || loading) return;
     const parsed = extractInput(slug);
     if (!parsed.value) return;
 
-    if (parsed.type === 'user') {
-      router.push(`/explore?slug=${encodeURIComponent('@' + parsed.value)}`);
-      fetchUserData(parsed.value);
+    const nextSlug = parsed.type === 'user' ? '@' + parsed.value : parsed.value;
+    if (nextSlug === initialSlug) {
+      if (parsed.type === 'user') fetchUserData(parsed.value);
+      else fetchData(parsed.value);
     } else {
-      router.push(`/explore?slug=${encodeURIComponent(parsed.value)}`);
-      fetchData(parsed.value);
+      router.push(`/explore?slug=${encodeURIComponent(nextSlug)}`);
+    }
+  };
+
+  const handleRandomChannel = async () => {
+    if (randomState === 'loading' || loading) return;
+    setRandomState('loading');
+    setError(null);
+    try {
+      const response = await fetch('/api/random-channel', { cache: 'no-store' });
+      const data = await response.json();
+      if (!response.ok) {
+        setError(data.error || 'could not find a followed channel. please try again.');
+        return;
+      }
+      if (typeof data.channel?.slug !== 'string' || !data.channel.slug.trim()) {
+        setError('could not find a followed channel. please try again.');
+        return;
+      }
+      setSlug(data.channel.slug);
+      if (data.channel.slug === initialSlug) {
+        await fetchData(data.channel.slug);
+      } else {
+        router.push(`/explore?slug=${encodeURIComponent(data.channel.slug)}`);
+      }
+    } catch {
+      setError('could not find a followed channel. please try again.');
+    } finally {
+      setRandomState('idle');
     }
   };
 
   const selectNode = useCallback((node: GraphNode) => {
     setSidebarMinimized(false);
+    setHistoryCollapsed(true);
     setSelectedNode(prev => {
       if (prev && prev.id !== node.id) {
         setHistory(h => {
@@ -386,11 +488,9 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   }, []);
 
   const jumpToHistory = useCallback((index: number) => {
+    setHistoryCollapsed(true);
     const prev = prevSelectedFgNodeRef.current;
-    if (prev?.type === 'block' && !prev.imageUrl && prev.__threeObj?.material?.color) {
-      prev.__threeObj.material.color.setHex(0x95e1d3);
-      prev.__threeObj.material.emissive.setHex(0x95e1d3);
-    }
+    if (prev) setParticleColor(prev, nodeColorsRef.current.get(prev.id) || clusterPalette[0]);
     prevSelectedFgNodeRef.current = null;
     setHistory(h => {
       const target = h[index];
@@ -403,14 +503,8 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
     const graphNode = node as GraphNode;
 
     const prev = prevSelectedFgNodeRef.current;
-    if (prev?.type === 'block' && !prev.imageUrl && prev.__threeObj?.material?.color) {
-      prev.__threeObj.material.color.setHex(0x95e1d3);
-      prev.__threeObj.material.emissive.setHex(0x95e1d3);
-    }
-    if (graphNode.type === 'block' && !graphNode.imageUrl && node.__threeObj?.material?.color) {
-      node.__threeObj.material.color.setHex(0xffd93d);
-      node.__threeObj.material.emissive.setHex(0xffd93d);
-    }
+    if (prev) setParticleColor(prev, nodeColorsRef.current.get(prev.id) || clusterPalette[0]);
+    setParticleColor(node, selectedParticleColor);
     prevSelectedFgNodeRef.current = node;
 
     selectNode(graphNode);
@@ -529,111 +623,158 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   }, [selectedNode]);
 
   const handleNodeHover = useCallback((node: any, prevNode: any) => {
-    if (prevNode?.__threeObj) {
-      prevNode.__threeObj.traverse((child: any) => {
-        if (child.material && child.material.opacity !== undefined) {
-          child.material.opacity = 0.5;
-        }
-      });
-    }
-    if (node?.__threeObj) {
-      node.__threeObj.traverse((child: any) => {
-        if (child.material && child.material.opacity !== undefined) {
-          child.material.opacity = 1.0;
-        }
+    for (const [target, opacity] of [[prevNode, 0.4], [node, 0.8]]) {
+      target?.__threeObj?.traverse((child: any) => {
+        if (child.userData.isImageEdge) child.material.opacity = opacity;
       });
     }
   }, []);
 
   const nodeThreeObject = useCallback((node: any) => {
     const graphNode = node as GraphNode;
-    const THREE = getThree();
+    const color = graphNode.id === selectedNodeRef.current?.id
+      ? selectedParticleColor
+      : nodeColorsRef.current.get(graphNode.id) || clusterPalette[0];
 
     if (graphNode.type === 'channel') {
-      const r = graphNode.val * 0.4;
+      const r = Math.min(3.2, Math.max(1.8, graphNode.val * 0.16));
       const group = new THREE.Group();
+      const particle = new THREE.Mesh(
+        new THREE.SphereGeometry(r, 12, 8),
+        new THREE.MeshBasicMaterial({ color })
+      );
+      particle.userData.isParticle = true;
+      group.add(particle);
 
-      const geo = new THREE.SphereGeometry(r, 24, 24);
-      const matOptions: any = {
-        color: 0xffffff,
-        emissive: 0xffffff,
-        emissiveIntensity: 0.15,
-        metalness: 0.6,
-        roughness: 0.1,
-        clearcoat: 1.0,
-        clearcoatRoughness: 0.05,
-        reflectivity: 1.0,
-        transparent: false,
-        opacity: 0.5,
-      };
-
-      if (graphNode.previewUrl) {
-        let texture = textureCache.current.get(graphNode.previewUrl);
-        if (!texture) {
-          const loader = new THREE.TextureLoader();
-          texture = loader.load(graphNode.previewUrl);
-          textureCache.current.set(graphNode.previewUrl, texture);
-        }
-        matOptions.map = texture;
-        matOptions.emissiveIntensity = 0.05;
-      }
-
-      const mat = new THREE.MeshPhysicalMaterial(matOptions);
-      group.add(new THREE.Mesh(geo, mat));
-
-      // Brackets always visible to distinguish channels from blocks
       const bracketGeo = new THREE.BufferGeometry();
       bracketGeo.setAttribute('position', new THREE.BufferAttribute(createBracketVertices(r), 3));
-      const brackets = new THREE.LineSegments(bracketGeo, new THREE.LineBasicMaterial({ color: 0xffffff }));
+      const brackets = new THREE.LineSegments(bracketGeo, new THREE.LineBasicMaterial({
+        color: '#b8b6c3', opacity: 0.35, transparent: true,
+      }));
       brackets.userData.isBracket = true;
       group.add(brackets);
-
+      group.userData.handNodeId = graphNode.id;
       return group;
     }
 
     if (graphNode.imageUrl) {
-      const size = graphNode.val * 1.2;
+      const size = Math.min(9, Math.max(4, graphNode.val * 0.7));
       let texture = textureCache.current.get(graphNode.imageUrl);
       if (!texture) {
-        const loader = new THREE.TextureLoader();
-        texture = loader.load(graphNode.imageUrl);
+        texture = new THREE.TextureLoader().load(graphNode.imageUrl);
         textureCache.current.set(graphNode.imageUrl, texture);
       }
       const group = new THREE.Group();
-      const planeMat = new THREE.MeshBasicMaterial({
-        map: texture,
-        side: THREE.DoubleSide,
-        transparent: false,
-        opacity: 0.5,
-      });
+      const planeMat = new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide });
       const planeGeo = new THREE.PlaneGeometry(size, size);
       const mesh = new THREE.Mesh(planeGeo, planeMat);
       mesh.onBeforeRender = (_renderer: any, _scene: any, camera: any) => {
         group.quaternion.copy(camera.quaternion);
       };
       group.add(mesh);
-      group.add(new THREE.LineSegments(
+      const edge = new THREE.LineSegments(
         new THREE.EdgesGeometry(planeGeo),
-        new THREE.LineBasicMaterial({ color: 0xffffff, opacity: 0.5, transparent: true })
-      ));
+        new THREE.LineBasicMaterial({ color, opacity: 0.4, transparent: true })
+      );
+      edge.userData.isImageEdge = true;
+      group.add(edge);
+      group.userData.handNodeId = graphNode.id;
+      group.userData.handImage = true;
       return group;
     }
 
-    const s = graphNode.val * 0.6;
-    const geo = new THREE.BoxGeometry(s, s, s);
-    const isSelected = graphNode.id === selectedNodeRef.current?.id;
-    const mat = new THREE.MeshStandardMaterial({
-      color: isSelected ? 0xffd93d : 0x95e1d3,
-      emissive: isSelected ? 0xffd93d : 0x95e1d3,
-      emissiveIntensity: 0.2,
-      metalness: 0.3,
-      roughness: 0.5,
-      transparent: false,
-      opacity: 0.5,
-    });
-    return new THREE.Mesh(geo, mat);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    const r = Math.min(1.6, Math.max(1.1, graphNode.val * 0.2));
+    const particle = new THREE.Mesh(
+      new THREE.SphereGeometry(r, 8, 6),
+      new THREE.MeshBasicMaterial({ color })
+    );
+    particle.userData.isParticle = true;
+    particle.userData.handNodeId = graphNode.id;
+    return particle;
   }, []);
+
+  const getLinkColor = useCallback((link: any) => {
+    const source = typeof link.source === 'object' ? link.source.id : link.source;
+    const target = typeof link.target === 'object' ? link.target.id : link.target;
+    const color = nodeColorsRef.current.get(source) || nodeColorsRef.current.get(target) || clusterPalette[0];
+    return new THREE.Color(color).multiplyScalar(0.32).getStyle();
+  }, []);
+
+  const getLinkCurveRotation = useCallback((link: any) =>
+    hashId(getLinkKey(link)) / 4294967296 * Math.PI * 2, []);
+
+  const resetHandControls = useCallback(() => {
+    const previous = handHoverRef.current;
+    if (previous) {
+      setParticleColor(previous.object, previous.id === selectedNodeRef.current?.id
+        ? selectedParticleColor : nodeColorsRef.current.get(previous.id) || clusterPalette[0]);
+    }
+    handHoverRef.current = null;
+    handHoverSelectionRef.current.reset();
+    handHoverProgressRef.current = 0;
+    setHandHoveredNodeName(null);
+    const captured = handCameraControlsRef.current;
+    if (captured) {
+      captured.controls.enabled = captured.enabled;
+      captured.controls.enableDamping = captured.damping;
+      handCameraControlsRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    resetHandControls();
+    return resetHandControls;
+  }, [initialSlug, loading, resetHandControls]);
+
+  const handleHandOutput = useCallback((output: HandOutput) => {
+    const fg = fgRef.current;
+    if (!fg || loading || !graphDataRef.current) {
+      resetHandControls();
+      return;
+    }
+    const controls = fg.controls() as HandGraphControls;
+    if (output.motion) {
+      if (!handCameraControlsRef.current) {
+        handCameraControlsRef.current = { controls, enabled: controls.enabled, damping: controls.enableDamping };
+        controls.enabled = false;
+        controls.enableDamping = false;
+        controls.update();
+      }
+      applyHandMotion(fg.camera(), controls, output.motion, viewport);
+    } else if (handCameraControlsRef.current) {
+      const captured = handCameraControlsRef.current;
+      captured.controls.enabled = captured.enabled;
+      captured.controls.enableDamping = captured.damping;
+      handCameraControlsRef.current = null;
+    }
+    const pick = (point: { x: number; y: number } | null) => {
+      if (!point || document.elementFromPoint(point.x, point.y)?.closest('[data-hand-ui]')) return null;
+      return pickHandNode(fg.scene(), fg.camera(), point, viewport);
+    };
+    const hit = pick(output.cursor);
+    if (hit?.id !== handHoverRef.current?.id) {
+      const previous = handHoverRef.current;
+      if (previous) {
+        setParticleColor(previous.object, previous.id === selectedNodeRef.current?.id
+          ? selectedParticleColor : nodeColorsRef.current.get(previous.id) || clusterPalette[0]);
+      }
+      handHoverRef.current = hit;
+      const node = graphDataRef.current.nodes.find(node => node.id === hit?.id);
+      setHandHoveredNodeName(node?.name || null);
+      if (hit) setParticleColor(hit.object, selectedParticleColor);
+    }
+    if (output.gesture !== 'aiming' || output.motion || !output.cursor) {
+      handHoverSelectionRef.current.cancel(hit?.id || null);
+      handHoverProgressRef.current = 0;
+      return;
+    }
+    const selection = handHoverSelectionRef.current.step(hit?.id || null, performance.now());
+    handHoverProgressRef.current = selection.progress;
+    if (selection.select) {
+      const node = graphDataRef.current.nodes.find(node => node.id === selection.select);
+      if (node) void handleNodeClick(node);
+    }
+  }, [handleNodeClick, loading, resetHandControls, viewport]);
 
   const getNodeLabel = useCallback((node: any) => {
     const graphNode = node as GraphNode;
@@ -641,14 +782,14 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
       const count = graphNode.channelData?.counts?.contents ?? graphNode.channelData?.length ?? '?';
       return `<div style="background:rgba(0,0,0,0);color:white;font-size:16px;max-width:250px;text-transform:lowercase">
         <strong><span style="font-family: var(--font-pixel)">${graphNode.name}</span></strong><br/>
-        <span style="color:#4ecdc4;font-size:14px;font-family: var(--font-pixel)">${count} items</span>
+        <span style="color:${nodeColorsRef.current.get(graphNode.id) || clusterPalette[0]};font-size:14px;font-family: var(--font-pixel)">${count} items</span>
       </div>`;
     }
     const block = graphNode.blockData;
     const blockType = block?.type || 'Block';
     return `<div style="background:rgba(0,0,0,0);color:white;font-size:13px;max-width:250px;font-family: var(--font-pixel)">
       <strong><span style="font-family: var(--font-pixel);text-transform: lowercase">${graphNode.name.substring(0, 40)}</span></strong><br/>
-      <span style="color:#95e1d3;font-size:14px;font-family: var(--font-pixel);text-transform: lowercase">${blockType}</span>
+      <span style="color:${nodeColorsRef.current.get(graphNode.id) || clusterPalette[0]};font-size:14px;font-family: var(--font-pixel);text-transform: lowercase">${blockType}</span>
     </div>`;
   }, []);
 
@@ -664,45 +805,61 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
     ch.counts?.contents ?? ch.length ?? '?';
 
   return (
-    <div className="relative w-full h-screen" onContextMenu={(e) => e.preventDefault()}>
-      <div className={`absolute z-10 flex flex-col gap-2 transition-all duration-700 ease-in-out ${
+    <div className="relative w-full h-[100dvh]" onContextMenu={(e) => e.preventDefault()}>
+      <div data-hand-ui className={`absolute z-10 max-w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-10rem)] flex flex-col gap-2 transition-all duration-700 ease-in-out ${
         graphData || loading ? 'top-4 left-4' : 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
       }`}>
-        <form onSubmit={handleSubmit} className={`flex gap-2 transition-transform duration-700 ${
-          graphData || loading ? '' : 'scale-110'
+        <form onSubmit={handleSubmit} className={`grid grid-cols-[minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_auto_auto] gap-2 transition-transform duration-700 ${
+          graphData || loading ? '' : 'md:scale-110'
         }`}>
           <input
             type="text"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
             placeholder="Enter Are.na channel or profile URL"
-            className="px-3 py-1 w-80 bg-black/50 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-white/50 backdrop-blur-sm font-pixel"
+            className="px-3 py-1 w-80 min-w-0 max-w-full bg-black/50 border border-white/20 text-white placeholder-white/50 focus:outline-none focus:border-white/50 backdrop-blur-sm font-pixel"
           />
           <button
             type="submit"
-            className="px-3 py-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white backdrop-blur-sm transition-colors font-pixel uppercase"
+            disabled={randomState === 'loading' || loading}
+            className="px-3 py-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white backdrop-blur-sm transition-colors font-pixel uppercase disabled:opacity-50 disabled:cursor-wait"
           >
             Explore
           </button>
+          <button
+            type="button"
+            onClick={handleRandomChannel}
+            disabled={randomState === 'loading' || loading}
+            title="random channel followed by cynthia"
+            className="justify-self-start px-3 py-1 bg-white/10 hover:bg-white/20 border border-white/20 text-white backdrop-blur-sm transition-colors font-pixel uppercase disabled:opacity-50 disabled:cursor-wait"
+          >
+            Random
+          </button>
         </form>
+
+        {randomState === 'loading' && (
+          <div role="status" className="text-white/70 text-sm font-pixel uppercase">finding channel...</div>
+        )}
 
         {loading && (
           <div className="text-white/70 text-sm font-pixel uppercase">Loading channel data...</div>
         )}
 
         {error && (
-          <div className="text-red-400 text-sm font-pixel">{error}</div>
+          <div role="alert" className="text-red-400 text-sm font-pixel">{error}</div>
         )}
 
         {selectedNode && (
-          <div className="w-80 max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
+          <div className="w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
             <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
               <button
                 onClick={() => setSidebarMinimized(m => !m)}
+                aria-expanded={!sidebarMinimized}
                 className="text-white/50 hover:text-white text-sm font-pixel uppercase flex items-center gap-1.5"
               >
-                <span className="inline-block transition-transform" style={{ transform: sidebarMinimized ? 'rotate(-90deg)' : 'rotate(0deg)' }}>▼</span>
-                {selectedNode.type === 'channel' ? '⁂' : '✴︎'} {selectedNode.name.substring(0, 25)}{selectedNode.name.length > 25 ? '…' : ''}
+                <InterfaceIcon name="chevron-down" className="transition-transform" style={{ transform: sidebarMinimized ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+                <InterfaceIcon name={selectedNode.type === 'channel' ? 'channel' : 'block'} />
+                {selectedNode.name.substring(0, 25)}{selectedNode.name.length > 25 ? '…' : ''}
               </button>
            
             </div>
@@ -713,9 +870,10 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                   <div className="px-3 pt-2 pb-2 border-b border-white/10">
                     <button
                       onClick={() => setHistoryCollapsed(h => !h)}
+                      aria-expanded={!historyCollapsed}
                       className="text-white/40 hover:text-white/60 text-[10px] uppercase tracking-wider mb-1.5 font-sans flex items-center gap-1 transition-colors"
                     >
-                      <span className="inline-block transition-transform" style={{ transform: historyCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }}>▼</span>
+                      <InterfaceIcon name="chevron-down" className="transition-transform" style={{ transform: historyCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
                       Path ({history.length})
                     </button>
                     {!historyCollapsed && (
@@ -724,17 +882,19 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                           <span key={`${node.id}-${i}`} className="flex items-center gap-1">
                             <button
                               onClick={() => jumpToHistory(i)}
-                              className="text-sm px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 transition-colors truncate max-w-[100px] font-pixel"
-                              style={{ color: node.type === 'channel' ? '#4ecdc4' : '#95e1d3' }}
+                              className="text-sm px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 transition-colors flex items-center gap-1 max-w-[100px] font-pixel"
+                              style={{ color: nodeColors.get(node.id) || clusterPalette[0] }}
                               title={node.name}
                             >
-                              {node.type === 'channel' ? '⁂' : '✴︎'} {node.name.substring(0, 20)}{node.name.length > 20 ? '…' : ''}
+                              <InterfaceIcon name={node.type === 'channel' ? 'channel' : 'block'} />
+                              <span className="min-w-0 truncate">{node.name.substring(0, 20)}{node.name.length > 20 ? '…' : ''}</span>
                             </button>
-                            <span className="text-white/20 text-[10px]">›</span>
+                            <InterfaceIcon name="chevron-right" className="text-white/20" />
                           </span>
                         ))}
-                        <span className="text-sm text-white/80 font-pixel truncate max-w-[200px]" title={selectedNode.name}>
-                          {selectedNode.type === 'channel' ? '⁂' : '✴︎'} {selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}
+                        <span className="text-sm text-white/80 font-pixel flex items-center gap-1 max-w-[200px]" title={selectedNode.name}>
+                          <InterfaceIcon name={selectedNode.type === 'channel' ? 'channel' : 'block'} />
+                          <span className="min-w-0 truncate">{selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}</span>
                         </span>
                       </div>
                     )}
@@ -747,13 +907,14 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                       onClick={() => jumpToHistory(history.length - 1)}
                       className="text-white/50 hover:text-white text-[10px] mb-2 flex items-center gap-1 font-sans uppercase"
                     >
-                      ← Back
+                      <InterfaceIcon name="arrow-left" />
+                      Back
                     </button>
                   )}
-                  <h3 className="text-white font-bold mb-2 font-pixel uppercase">
-                    {selectedNode.type === 'channel' ? '⁂ Channel' : '✴︎ Block'}
+                  <h3 className="text-white font-bold mb-2 font-pixel uppercase flex items-center gap-1.5">
+                    <InterfaceIcon name={selectedNode.type === 'channel' ? 'channel' : 'block'} />
+                    {selectedNode.type === 'channel' ? 'Channel' : 'Block'}
                   </h3>
-                  {/* <p className="text-white/80 text-sm mb-2 font-pixel uppercase">{selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}</p> */}
 
                   {selectedNode.type === 'block' && selectedNode.blockData && (() => {
                     const block = selectedNode.blockData;
@@ -827,10 +988,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                   <button
                     onClick={() => {
                       const prev = prevSelectedFgNodeRef.current;
-                      if (prev?.type === 'block' && !prev.imageUrl && prev.__threeObj?.material?.color) {
-                        prev.__threeObj.material.color.setHex(0x95e1d3);
-                        prev.__threeObj.material.emissive.setHex(0x95e1d3);
-                      }
+                      if (prev) setParticleColor(prev, nodeColorsRef.current.get(prev.id) || clusterPalette[0]);
                       prevSelectedFgNodeRef.current = null;
                       setSelectedNode(null); setHistory([]); setSidebarMinimized(false);
                     }}
@@ -845,68 +1003,51 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         )}
       </div>
 
-      <div className="absolute top-4 right-4 z-10 flex flex-col items-end gap-2">
+      <div data-hand-ui className="absolute top-16 sm:top-4 bottom-4 right-4 z-10 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-2 pointer-events-none">
         <button
           type="button"
           onClick={() => setControlsOpen((open) => !open)}
-          className="flex items-center gap-1 px-3 py-1.5 bg-black/50 hover:bg-black/70 border border-white/20 text-white text-xs font-pixel uppercase backdrop-blur-sm transition-colors"
+          aria-expanded={controlsOpen}
+          className="pointer-events-auto shrink-0 flex items-center gap-1 px-3 py-1.5 bg-black/50 hover:bg-black/70 border border-white/20 text-white text-xs font-pixel uppercase backdrop-blur-sm transition-colors"
         >
-          <Info size={14} />
+          <InterfaceIcon name="orbit" />
           Controls
         </button>
 
         {controlsOpen && (
-          <div className="w-80 max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
-            <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
-              <div className="text-white/70 text-xs font-pixel uppercase tracking-wide">
-                Controls
-              </div>
-              <button
-                type="button"
-                onClick={() => setControlsOpen(false)}
-                className="text-white/40 hover:text-white/80 text-xs font-pixel uppercase tracking-wide"
-              >
-                Close
-              </button>
-            </div>
-
-            <div className="p-4 space-y-4 text-xs">
-              <div>
-                <p className="text-white/60 font-pixel uppercase mb-1">Mouse</p>
-                <p className="text-white/70 font-sans lowercase">
-                  drag to rotate • shift-drag or right-drag to pan • scroll to zoom
-                </p>
-              </div>
-              <div>
-                <p className="text-white/60 font-pixel uppercase mb-1">Keyboard movement</p>
-                <p className="text-white/70 font-sans lowercase">
-                  wasd: pan the view in screen space • q / e: zoom in / out along view
-                </p>
-              </div>
-              <div>
-                <p className="text-white/40 text-[10px] font-pixel uppercase tracking-wide">
-                  tip
-                </p>
-                <p className="text-white/50 text-[11px] font-sans lowercase">
-                  hold shift while using keys to move and rotate faster.
-                </p>
-              </div>
-            </div>
+          <div className="min-h-0 overflow-y-auto custom-scrollbar pointer-events-auto">
+            <NavigationGuide onClose={() => setControlsOpen(false)} />
           </div>
         )}
+        <div className="mt-auto shrink-0 pointer-events-auto">
+          <HandControlsPanel
+            viewport={viewport}
+            graphKey={initialSlug}
+            available={!loading && !!graphData && viewport.width >= 768}
+            hoveredNodeName={handHoveredNodeName}
+            hoverProgressRef={handHoverProgressRef}
+            onOutput={handleHandOutput}
+            onReset={resetHandControls}
+          />
+        </div>
       </div>
 
       {!loading && graphData && (
         <ForceGraph3D
-          ref={fgRef}
+          ref={attachGraph as any}
+          width={viewport.width}
+          height={viewport.height}
           graphData={graphData}
           nodeThreeObject={nodeThreeObject}
           nodeThreeObjectExtend={false}
           nodeLabel={getNodeLabel}
-          linkColor={() => '#d6d6d6'}
-          linkWidth={0.5}
-          linkOpacity={0.5}
-          backgroundColor="#0a0a0a"
+          linkColor={getLinkColor}
+          linkCurvature={0.16}
+          linkCurveRotation={getLinkCurveRotation}
+          linkWidth={0}
+          linkOpacity={1}
+          cooldownTicks={120}
+          backgroundColor="#030406"
           onNodeClick={handleNodeClick}
           onNodeRightClick={handleNodeRightClick}
           onNodeHover={handleNodeHover}

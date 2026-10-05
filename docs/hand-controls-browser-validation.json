@@ -1,0 +1,21 @@
+{
+  "landscapePhoneCameraHidden": true,
+  "actualWorkerAndFakeCamera": true,
+  "lazyActivation": true,
+  "pauseKeepsCamera": true,
+  "stopReleasesCamera": true,
+  "hiddenPageStopsCamera": true,
+  "channelChangePreservesCamera": true,
+  "keyboardActivation": true,
+  "permissionFailure": true,
+  "mobileCameraHidden": true,
+  "resizeStopsActiveCamera": true,
+  "layout": {
+    "guideBottom": 570.390625,
+    "videoTop": 628.125,
+    "videoWidth": 238,
+    "videoHeight": 178.5,
+    "fits": true
+  },
+  "errors": []
+}

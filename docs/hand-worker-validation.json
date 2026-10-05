@@ -1,0 +1,20 @@
+[
+  {
+    "browser": "chrome",
+    "status": "passed",
+    "fixtureUrl": "https://storage.googleapis.com/mediapipe-assets/thumb_up.jpg",
+    "initialized": true,
+    "inference": true,
+    "blankHands": 0,
+    "hands": 1,
+    "landmarkCounts": [
+      21
+    ],
+    "elapsedMs": 364.69999998807907
+  },
+  {
+    "browser": "webkit",
+    "status": "unavailable or failed",
+    "error": "browserType.launch: Executable doesn't exist at /Users/cozycloud/Library/Caches/ms-playwright/webkit-2336/pw_run.sh\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     npx playwright install                                 ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"
+  }
+]
