@@ -1,0 +1,292 @@
+{
+  "date": "2026-10-05",
+  "baselineRevision": "8ecdd2ce5c7ddd7725eef83772d3b03107330400",
+  "method": "five alternating production runs per side; 1440x900 viewport; device pixel ratio 2; deterministic 121-channel fixture with 120 links; api intercepted; 18-second settle; 2-second observation",
+  "fixture": {
+    "nodes": 121,
+    "links": 120
+  },
+  "runs": [
+    {
+      "side": 0,
+      "run": 0,
+      "url": "http://localhost:3100",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 30,
+      "render": {
+        "frame": 166,
+        "calls": 363,
+        "triangles": 136464,
+        "points": 2000,
+        "lines": 726
+      },
+      "memory": {
+        "geometries": 243,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 647700,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 1,
+      "run": 0,
+      "url": "http://localhost:3101",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 29,
+      "render": {
+        "frame": 299,
+        "calls": 363,
+        "triangles": 20328,
+        "points": 1400,
+        "lines": 846
+      },
+      "memory": {
+        "geometries": 363,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 478028,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 0,
+      "run": 1,
+      "url": "http://localhost:3100",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 32,
+      "render": {
+        "frame": 160,
+        "calls": 363,
+        "triangles": 136464,
+        "points": 2000,
+        "lines": 726
+      },
+      "memory": {
+        "geometries": 243,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 647700,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 1,
+      "run": 1,
+      "url": "http://localhost:3101",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 29,
+      "render": {
+        "frame": 290,
+        "calls": 363,
+        "triangles": 20328,
+        "points": 1400,
+        "lines": 846
+      },
+      "memory": {
+        "geometries": 363,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 478028,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 0,
+      "run": 2,
+      "url": "http://localhost:3100",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 22,
+      "render": {
+        "frame": 142,
+        "calls": 363,
+        "triangles": 136464,
+        "points": 2000,
+        "lines": 726
+      },
+      "memory": {
+        "geometries": 243,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 647700,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 1,
+      "run": 2,
+      "url": "http://localhost:3101",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 22,
+      "render": {
+        "frame": 226,
+        "calls": 363,
+        "triangles": 20328,
+        "points": 1400,
+        "lines": 846
+      },
+      "memory": {
+        "geometries": 363,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 478028,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 0,
+      "run": 3,
+      "url": "http://localhost:3100",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 26,
+      "render": {
+        "frame": 119,
+        "calls": 363,
+        "triangles": 136464,
+        "points": 2000,
+        "lines": 726
+      },
+      "memory": {
+        "geometries": 243,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 647700,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 1,
+      "run": 3,
+      "url": "http://localhost:3101",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 23,
+      "render": {
+        "frame": 230,
+        "calls": 363,
+        "triangles": 20328,
+        "points": 1400,
+        "lines": 846
+      },
+      "memory": {
+        "geometries": 363,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 478028,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 0,
+      "run": 4,
+      "url": "http://localhost:3100",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 32,
+      "render": {
+        "frame": 129,
+        "calls": 363,
+        "triangles": 136464,
+        "points": 2000,
+        "lines": 726
+      },
+      "memory": {
+        "geometries": 243,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 647700,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 1,
+      "run": 4,
+      "url": "http://localhost:3101",
+      "apiRequests": 1,
+      "errors": [],
+      "frames": 29,
+      "render": {
+        "frame": 290,
+        "calls": 363,
+        "triangles": 20328,
+        "points": 1400,
+        "lines": 846
+      },
+      "memory": {
+        "geometries": 363,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 478028,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    }
+  ],
+  "limits": "channel-heavy fixture, mocked provider latency, headless chromium. resource bytes and renderer counts are deterministic workload measurements. frame-rate gain is inconclusive. memory.geometries counts objects, not bytes."
+}

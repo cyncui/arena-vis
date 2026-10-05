@@ -1,0 +1,76 @@
+{
+  "fixture": {
+    "nodes": 121,
+    "links": 120
+  },
+  "results": [
+    {
+      "side": 0,
+      "run": 0,
+      "url": "http://localhost:3100",
+      "apiRequests": 1,
+      "errors": [],
+      "indexedCalls": 3856,
+      "indexedTriangles": 2183424,
+      "indexedLines": 0,
+      "frames": 32,
+      "render": {
+        "frame": 137,
+        "calls": 363,
+        "triangles": 136464,
+        "points": 2000,
+        "lines": 726
+      },
+      "memory": {
+        "geometries": 243,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 647700,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    },
+    {
+      "side": 1,
+      "run": 0,
+      "url": "http://localhost:3101",
+      "apiRequests": 1,
+      "errors": [],
+      "indexedCalls": 3509,
+      "indexedTriangles": 589512,
+      "indexedLines": 0,
+      "frames": 29,
+      "render": {
+        "frame": 300,
+        "calls": 363,
+        "triangles": 20328,
+        "points": 1400,
+        "lines": 846
+      },
+      "memory": {
+        "geometries": 363,
+        "textures": 0
+      },
+      "graph": {
+        "nodes": 121,
+        "links": 120
+      },
+      "resources": 478102,
+      "canvas": {
+        "width": 2880,
+        "height": 1800
+      }
+    }
+  ],
+  "sourceHashes": {
+    "src/components/Arena3D.tsx": "f0e6d025d64805e925aa8f720defd129037ed13b0c49ebd06d60e81b4bb50211",
+    "src/components/ConstellationCanvas.tsx": "fb698de23962d89d5001c449ca3b1d4f6ec400e9070dc99f3a289d4d1dd213da",
+    "src/components/LandingPage.tsx": "4c0bc2727887de947ec6699a5efa535a8cecd53cd480c875c287eebbb1a51684",
+    "src/app/globals.css": "23296e3fc63659fb0fa0ab0f327193605d312556086b4a42f85a88bbf36f4700"
+  }
+}

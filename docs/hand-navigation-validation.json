@@ -1,0 +1,14 @@
+{
+  "syntheticLandmarks": true,
+  "actualGraphCamera": true,
+  "hoverSelections": 1,
+  "expansionReused": true,
+  "navigationSuppressesHoverSelection": true,
+  "oneHandDepthZoom": true,
+  "directZoomOutFromClosedPinch": true,
+  "closedFistPan": true,
+  "manualControlRestored": true,
+  "responsiveTwoHandZoom": true,
+  "reversibleZoom": true,
+  "errors": []
+}

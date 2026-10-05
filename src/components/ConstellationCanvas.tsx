@@ -8,13 +8,9 @@ interface Star {
   y: number;
   char: string;
   size: number;
-  floatDur: number;
-  floatDelay: number;
-  glowDur: number;
-  glowDelay: number;
 }
 
-const STAR_CHARS = ['✦', '✧', '·', '∗', '✶', '★', '⋆', '✹'];
+const STAR_CHARS = ['·', '·', '·', '✦', '⋆'];
 const STAR_COUNT = 42;
 const MIN_DISTANCE = 7; // minimum % distance between stars
 
@@ -40,10 +36,6 @@ function generateStars(): Star[] {
         y,
         char: STAR_CHARS[Math.floor(Math.random() * STAR_CHARS.length)],
         size: 8 + Math.random() * 12,
-        floatDur: 3 + Math.random() * 3,
-        floatDelay: Math.random() * 4,
-        glowDur: 2.5 + Math.random() * 3,
-        glowDelay: Math.random() * 4,
       });
     }
     attempts++;
@@ -103,7 +95,7 @@ export default function ConstellationCanvas() {
     return map;
   }, [stars]);
 
-  const renderLines = (starIds: number[], opacity: number) => {
+  const renderLines = (starIds: number[]) => {
     const lines = [];
     for (let i = 0; i < starIds.length - 1; i++) {
       const a = starMap.get(starIds[i]);
@@ -116,9 +108,9 @@ export default function ConstellationCanvas() {
           y1={a.y}
           x2={b.x}
           y2={b.y}
-          stroke={`rgba(220,215,205,${opacity})`}
-          strokeWidth="0.2"
-          strokeDasharray="0.8 0.5"
+          stroke="#b9b2ca"
+          strokeWidth="0.75"
+          vectorEffect="non-scaling-stroke"
         />
       );
     }
@@ -136,14 +128,13 @@ export default function ConstellationCanvas() {
         preserveAspectRatio="none"
       >
         {constellations.map((c, i) => (
-          <g key={i}>{renderLines(c, 0.35)}</g>
+          <g key={i}>{renderLines(c)}</g>
         ))}
         {activeConstellation.length >= 2 && (
-          <g>{renderLines(activeConstellation, 0.6)}</g>
+          <g>{renderLines(activeConstellation)}</g>
         )}
       </svg>
 
-      {/* Stars — outer div handles centering, inner span handles animation */}
       {stars.map((star) => {
         const isConnected = connectedStarIds.has(star.id);
         const isActive =
@@ -164,15 +155,7 @@ export default function ConstellationCanvas() {
               className={`star relative block cursor-pointer select-none transition-[transform,color] duration-200 hover:scale-150 ${
                 isConnected ? 'text-white' : 'text-white/50'
               } ${isActive ? 'scale-125' : ''}`}
-              style={
-                {
-                  fontSize: `${star.size}px`,
-                  '--float-dur': `${star.floatDur}s`,
-                  '--float-delay': `${star.floatDelay}s`,
-                  '--glow-dur': `${star.glowDur}s`,
-                  '--glow-delay': `${star.glowDelay}s`,
-                } as React.CSSProperties
-              }
+              style={{ fontSize: `${star.size}px` }}
               onClick={(e) => handleStarClick(e, star.id)}
             >
               {star.char}
