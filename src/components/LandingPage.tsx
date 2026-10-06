@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import Image from 'next/image';
 import ConstellationCanvas from './ConstellationCanvas';
 
 export default function LandingPage() {
@@ -9,9 +10,15 @@ export default function LandingPage() {
       <div className="relative z-10 flex h-full">
         {/* Left panel */}
         <div className="flex flex-col justify-center px-10 md:px-16 w-full md:w-[45%]">
-          <h1 className="landing-title text-6xl md:text-8xl tracking-wide mb-6 animate-fade-in-up [text-wrap:balance]">
-            kabo{' '}
-            <span className="text-5xl md:text-7xl">花望</span>
+          <h1 className="landing-title flex items-center gap-3 md:gap-5 text-6xl md:text-8xl tracking-wide mb-6 animate-fade-in-up [text-wrap:balance]">
+            kabo
+            <Image
+              src="/brand/kabo-logo.svg"
+              alt="花望"
+              width={128}
+              height={128}
+              className="h-16 w-16 shrink-0 md:h-24 md:w-24"
+            />
           </h1>
 
           <p className="landing-subtitle text-white/70 text-base md:text-lg leading-relaxed max-w-md mb-12 font-light font-sans animate-fade-in-up [text-wrap:pretty]">
