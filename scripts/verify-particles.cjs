@@ -50,7 +50,13 @@ async function attachProbe(page) {
     }
     return false;
   });
-  await page.waitForFunction(() => window.graphProbe.renderer().info.render.triangles > 0);
+  await page.waitForFunction(expectedLinks => {
+    let links = 0;
+    window.graphProbe.scene().traverse(object => {
+      if (object.__graphObjType === 'link') links++;
+    });
+    return links === expectedLinks && window.graphProbe.renderer().info.render.triangles > 0;
+  }, graphData.links.length);
 }
 async function clickNode(page, id, button = 'left') {
   await page.evaluate(() => window.graphProbe.scene().traverse(object => {
@@ -86,11 +92,12 @@ async function snapshot(page) {
   });
 }
 let browser;
+let page;
+const errors = [];
+const requests = [];
 (async () => {
   browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
-  const errors = [];
-  const requests = [];
+  page = await browser.newPage({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2 });
   page.on('pageerror', error => errors.push(error.message));
   await page.route('**/api/**', route => {
     const url = new URL(route.request().url());
@@ -165,4 +172,13 @@ let browser;
   fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: true, initial, requests, errors, scenarios: ['opaque curved stems', 'spherical particles', 'cluster colors', 'selection and history restore', 'expansion and collapse', 'image preview', 'random channel', 'new search', 'mobile canvas', 'mobile particle selection'] }, null, 2));
   console.log('passed particle browser checks');
   await browser.close();
-})().catch(async error => { console.error(error); if (browser) await browser.close(); process.exitCode = 1; });
+})().catch(async error => {
+  console.error(error);
+  fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ passed: false, message: error.message, requests, errors }, null, 2));
+  if (page && !page.isClosed()) {
+    await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
+    fs.writeFileSync(path.join(output, 'failure.html'), await page.content().catch(() => ''));
+  }
+  if (browser) await browser.close();
+  process.exitCode = 1;
+});

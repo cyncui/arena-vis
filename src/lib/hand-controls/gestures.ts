@@ -58,7 +58,9 @@ export class HandGestureController {
       return { ...output, gesture: 'locked' };
     }
     if (this.lastTimestamp !== null && frame.timestamp <= this.lastTimestamp) {
-      return { ...output, cursor: this.hands[0] ? pixels(this.hands[0].cursor, viewport) : null, gesture: this.state.kind };
+      const primary = this.hands.find(hand => hand.id === this.primaryId);
+      const closing = this.state.kind === 'aiming' && this.hands.some(hand => hand.rawFist || hand.rawRatio <= 0.25);
+      return { ...output, cursor: primary && !closing ? pixels(primary.cursor, viewport) : null, gesture: this.state.kind };
     }
     const dt = this.lastTimestamp === null ? 60 : frame.timestamp - this.lastTimestamp;
     if (dt > 200 || (this.hands.length > 0 && frame.hands.length < this.hands.length)) this.reset(true);
@@ -110,7 +112,8 @@ export class HandGestureController {
     const activeId = 'hand' in this.state ? this.state.hand : null;
     const primary = this.hands.find(hand => hand.id === (activeId ?? this.primaryId)) ?? this.hands[0];
     this.primaryId = primary.id;
-    output.cursor = pixels(primary.cursor, viewport);
+    output.cursor = this.state.kind === 'aiming' && this.hands.some(hand => hand.rawFist || hand.rawRatio <= 0.25)
+      ? null : pixels(primary.cursor, viewport);
     const pinched = this.hands.filter(hand => hand.pinched);
     if (this.state.kind === 'locked') {
       this.state.releaseFrames = raw.every(hand => !hand.fist && hand.ratio >= 0.40) ? this.state.releaseFrames + 1 : 0;
