@@ -7,6 +7,9 @@ const ts = require('typescript');
 const source = readFileSync(new URL('../src/lib/hand-controls/gestures.ts', import.meta.url), 'utf8');
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
 const { HandGestureController } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`);
+const hoverSource = readFileSync(new URL('../src/lib/hand-controls/hover-selection.ts', import.meta.url), 'utf8');
+const hoverJavascript = ts.transpileModule(hoverSource, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
+const { HoverSelectionController } = await import(`data:text/javascript;base64,${Buffer.from(hoverJavascript).toString('base64')}`);
 const viewport = { width: 1000, height: 800 };
 const hand = (x = 0.5, ratio = 0.7, width = 0.1, y = 0.5) => {
   const points = Array.from({ length: 21 }, () => ({ x, y, z: 0 }));
@@ -187,10 +190,64 @@ check('a closed fist pans with mirrored movement and preserves zoom', () => {
   assert(moved.motion.dy > 0);
   assert.equal(moved.motion.scale, 1);
 });
+check('closing a pinch cancels selection before navigation is confirmed', () => {
+  const f = fixture();
+  assert.deepEqual(f.frame([hand()]).cursor, { x: 500, y: 240 });
+  const closing = f.frame([hand(0.5, 0.1)]);
+  assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null });
+  assert.deepEqual(f.frame([hand(0.5, 0.1)], 0), closing);
+  assert.equal(f.frame([hand(0.5, 0.1)]).gesture, 'pinch');
+  f.frame([hand()]);
+  assert.deepEqual(f.frame([hand()]), { cursor: { x: 500, y: 240 }, gesture: 'aiming', motion: null });
+});
+check('a rejected pinch resumes selection from an open hand', () => {
+  const f = fixture();
+  f.frame([hand()]);
+  assert.deepEqual(f.frame([hand(0.5, 0.1)]), { cursor: null, gesture: 'aiming', motion: null });
+  assert.deepEqual(f.frame([hand()]), { cursor: { x: 500, y: 240 }, gesture: 'aiming', motion: null });
+});
+check('closing a fist cancels selection before pan is confirmed', () => {
+  const f = fixture();
+  assert.deepEqual(f.frame([hand()]).cursor, { x: 500, y: 240 });
+  const closing = f.frame([fist()]);
+  assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null });
+  assert.deepEqual(f.frame([fist()], 0), closing);
+  assert.equal(f.frame([fist()]).gesture, 'pan');
+  f.frame([hand()]);
+  assert.equal(f.frame([hand()]).gesture, 'aiming');
+  assert.equal(f.frame([hand()]).cursor.x, 500);
+});
+check('either hand starting navigation cancels aiming on the primary hand', () => {
+  for (const [closingHand, expectedGesture] of [[hand(0.7, 0.1), 'pinch'], [fist(0.7), 'pan']]) {
+    const f = fixture();
+    assert.deepEqual(f.frame([hand(0.3), hand(0.7)]).cursor, { x: 700, y: 240 });
+    const closing = f.frame([hand(0.3), closingHand]);
+    assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null });
+    assert.deepEqual(f.frame([hand(0.3), closingHand], 0), closing);
+    const confirmed = f.frame([hand(0.3), closingHand]);
+    assert.equal(confirmed.gesture, expectedGesture);
+    assert.equal(confirmed.motion, null);
+  }
+});
 check('fist takes priority over thumb index contact', () => {
   const f = fixture();
   f.frame([fist()]);
   assert.equal(f.frame([fist()]).gesture, 'pan');
+});
+check('first closure cancels a nearly complete dwell and reopening starts a full dwell', () => {
+  for (const closingHands of [[hand(0.3, 0.1), hand(0.7)], [hand(0.3), hand(0.7, 0.1)], [fist(0.3), hand(0.7)], [hand(0.3), fist(0.7)]]) {
+    const f = fixture();
+    const hover = new HoverSelectionController();
+    const aim = (hands, now) => {
+      const output = f.frame(hands);
+      return hover.step(output.gesture === 'aiming' && output.cursor ? 'target' : null, now);
+    };
+    for (let now = 0; now <= 600; now += 50) assert.equal(aim([hand(0.3), hand(0.7)], now).select, null);
+    assert.deepEqual(aim(closingHands, 650), { select: null, progress: 0 });
+    assert.deepEqual(aim([hand(0.3), hand(0.7)], 700), { select: null, progress: 0 });
+    for (let now = 750; now < 1350; now += 50) assert.equal(aim([hand(0.3), hand(0.7)], now).select, null);
+    assert.deepEqual(aim([hand(0.3), hand(0.7)], 1350), { select: 'target', progress: 1 });
+  }
 });
 check('open fingers and degenerate finger joints do not count as a fist', () => {
   for (const extended of [hand(), (() => {

@@ -30,6 +30,15 @@ const fixture = { nodes: Array.from({ length: 21 }, (_, index) => ({ id: `channe
     await page.getByRole('button', { name: 'hand controls', exact: true }).click();
     assert.equal(await page.evaluate(() => window.handTest.cameraCalls), 0);
     assert.equal(await page.evaluate(() => performance.getEntriesByType('resource').filter(entry => entry.name.includes('/hand-tracking/')).length), 0);
+    await page.getByText('video and landmarks are never uploaded or saved.', { exact: false }).waitFor();
+    const reference = page.getByText('gesture reference', { exact: true });
+    await reference.focus();
+    await page.keyboard.press('Enter');
+    assert.ok(await page.getByLabel('hand gestures', { exact: true }).isVisible(), 'keyboard opens the gesture reference');
+    await page.getByText('keep your other fingers open when pinching. release to stop.', { exact: true }).waitFor();
+    await page.screenshot({ path: `${output}/before-camera.png` });
+    await page.keyboard.press('Enter');
+    assert.ok(await page.getByLabel('hand gestures', { exact: true }).isHidden(), 'keyboard closes the gesture reference');
     await page.getByRole('button', { name: 'enable camera', exact: true }).click();
     await page.getByRole('button', { name: 'pause', exact: true }).waitFor({ timeout: 25000 });
     await page.waitForFunction(() => window.handTest.results > 3);
@@ -70,6 +79,13 @@ const fixture = { nodes: Array.from({ length: 21 }, (_, index) => ({ id: `channe
     await page.screenshot({ path: `${output}/short-desktop.png` });
     await page.getByRole('button', { name: 'enable camera', exact: true }).click();
     await page.getByRole('button', { name: 'pause', exact: true }).waitFor();
+    await reference.click();
+    const stop = page.getByRole('button', { name: 'stop camera', exact: true });
+    const stopBounds = await stop.boundingBox();
+    const panelBounds = await stop.locator('xpath=../..').boundingBox();
+    assert.ok(stopBounds.y >= 0 && stopBounds.y + stopBounds.height <= 600, 'stop camera remains reachable on a short desktop');
+    assert.ok(panelBounds.y >= 0 && panelBounds.y + panelBounds.height <= 600, 'expanded hand panel fits the short viewport');
+    await page.screenshot({ path: `${output}/short-desktop-active.png` });
     await page.setViewportSize({ width: 390, height: 844 });
     await page.waitForFunction(() => window.handTest.streams.at(-1).getTracks()[0].readyState === 'ended');
     assert.equal(await page.getByRole('button', { name: 'hand controls', exact: true }).count(), 0);
@@ -83,11 +99,30 @@ const fixture = { nodes: Array.from({ length: 21 }, (_, index) => ({ id: `channe
     await denied.getByRole('button', { name: 'hand controls', exact: true }).click();
     await denied.getByRole('button', { name: 'enable camera', exact: true }).click();
     await denied.getByRole('alert').filter({ hasText: 'camera permission was denied' }).waitFor();
+    const pending = await context.newPage();
+    await pending.addInitScript(() => {
+      const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getUserMedia = async options => {
+        const stream = await original(options);
+        window.lateCameraStream = stream;
+        await new Promise(resolve => { window.releaseCamera = resolve; });
+        return stream;
+      };
+    });
+    await pending.route('**/api/arena?*', route => route.fulfill({ json: { graphData: fixture } }));
+    await pending.goto(`${url}/explore?slug=pending-camera`, { waitUntil: 'networkidle' });
+    await pending.getByRole('button', { name: 'hand controls', exact: true }).click();
+    await pending.getByRole('button', { name: 'enable camera', exact: true }).click();
+    await pending.waitForFunction(() => typeof window.releaseCamera === 'function');
+    await pending.getByRole('button', { name: 'stop camera', exact: true }).click();
+    await pending.evaluate(() => window.releaseCamera());
+    await pending.waitForFunction(() => window.lateCameraStream.getTracks().every(track => track.readyState === 'ended'));
+    assert.equal(await pending.getByRole('button', { name: 'enable camera', exact: true }).count(), 1, 'late camera permission cannot restart stopped capture');
     const phone = await browser.newPage({ viewport: { width: 844, height: 390 }, isMobile: true, hasTouch: true });
     await phone.route('**/api/arena?*', route => route.fulfill({ json: { graphData: fixture } }));
     await phone.goto(`${url}/explore?slug=phone`, { waitUntil: 'networkidle' });
     assert.equal(await phone.getByRole('button', { name: 'hand controls', exact: true }).count(), 0);
-    const report = { landscapePhoneCameraHidden: true, actualWorkerAndFakeCamera: true, lazyActivation: true, pauseKeepsCamera: true, stopReleasesCamera: true, hiddenPageStopsCamera: true, channelChangePreservesCamera: true, keyboardActivation: true, permissionFailure: true, mobileCameraHidden: true, resizeStopsActiveCamera: true, layout, errors };
+    const report = { gestureReferenceKeyboard: true, shortViewportCameraActions: true, landscapePhoneCameraHidden: true, actualWorkerAndFakeCamera: true, lazyActivation: true, pauseKeepsCamera: true, stopReleasesCamera: true, hiddenPageStopsCamera: true, channelChangePreservesCamera: true, keyboardActivation: true, permissionFailure: true, stopDuringPendingCamera: true, mobileCameraHidden: true, resizeStopsActiveCamera: true, layout, errors };
     fs.writeFileSync('docs/hand-controls-browser-validation.json', `${JSON.stringify(report, null, 2)}\n`);
     console.log(JSON.stringify(report, null, 2));
   } finally { await browser.close(); }

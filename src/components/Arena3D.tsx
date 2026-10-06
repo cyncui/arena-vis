@@ -1,14 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import InterfaceIcon from './InterfaceIcon';
 import NavigationGuide from './NavigationGuide';
 import HandControlsPanel from './HandControlsPanel';
 import { applyHandMotion, pickHandNode, type HandGraphHit, type HandGraphControls } from '@/lib/hand-controls/graph-adapter';
-import type { HandOutput } from '@/lib/hand-controls/types';
-import { HoverSelectionController } from '@/lib/hand-controls/hover-selection';
+import type { GraphSurface, HandInteraction, NavigationIntent } from '@/lib/hand-controls/interaction';
+import { bindManualInput } from '@/lib/hand-controls/dom-input';
 
 import * as THREE from 'three';
 
@@ -151,13 +151,17 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const [controlsOpen, setControlsOpen] = useState(false);
   const [handHoveredNodeName, setHandHoveredNodeName] = useState<string | null>(null);
   const handHoverRef = useRef<HandGraphHit | null>(null);
-  const handHoverSelectionRef = useRef(new HoverSelectionController());
-  const handHoverProgressRef = useRef(0);
-  const handCameraControlsRef = useRef<{ controls: HandGraphControls; enabled: boolean; damping: boolean } | null>(null);
+  const handCursor = useRef<HTMLDivElement>(null);
+  const handHoverRing = useRef<SVGCircleElement>(null);
+  const [interaction, setInteraction] = useState<HandInteraction | null>(null);
+  const [renderer, setRenderer] = useState<any>(null);
+  const detachHandSurface = useRef<(() => void) | null>(null);
+  const handSurface = useRef<GraphSurface | null>(null);
+  const handTargetIds = useRef<Set<string>>(new Set());
+  const graphElement = useRef<HTMLDivElement>(null);
   const [randomState, setRandomState] = useState<'idle' | 'loading'>('idle');
   const exploringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textureCache = useRef<Map<string, any>>(new Map());
-  const keysPressed = useRef<Set<string>>(new Set());
   const selectedNodeRef = useRef<GraphNode | null>(null);
   const prevSelectedFgNodeRef = useRef<any>(null);
   const graphDataRef = useRef<GraphData | null>(null);
@@ -191,80 +195,12 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   }, [graphData, nodeColors, selectedNode]);
 
   useEffect(() => { selectedNodeRef.current = selectedNode; }, [selectedNode]);
-  useEffect(() => { graphDataRef.current = graphData; }, [graphData]);
 
   useEffect(() => {
-    let animId: number | null = null;
-    const movementKeys = new Set(['w', 'a', 's', 'd', 'q', 'e']);
-    const direction = new THREE.Vector3();
-    const right = new THREE.Vector3();
-    const up = new THREE.Vector3();
-    const offset = new THREE.Vector3();
-    const hasMovement = () => [...keysPressed.current].some(key => movementKeys.has(key));
-    const tick = () => {
-      animId = null;
-      if (!hasMovement()) return;
-      const fg = fgRef.current;
-      if (fg) {
-        const camera = fg.camera();
-        const controls = fg.controls();
-        const keys = keysPressed.current;
-        const speed = keys.has('shift') ? 8 : 3;
-        camera.getWorldDirection(direction);
-        right.setFromMatrixColumn(camera.matrix, 0).normalize();
-        up.setFromMatrixColumn(camera.matrix, 1).normalize();
-        offset.set(0, 0, 0);
-        if (keys.has('a')) offset.addScaledVector(right, -speed);
-        if (keys.has('d')) offset.addScaledVector(right, speed);
-        if (keys.has('w')) offset.addScaledVector(up, speed);
-        if (keys.has('s')) offset.addScaledVector(up, -speed);
-        if (keys.has('q')) offset.addScaledVector(direction, -speed);
-        if (keys.has('e')) offset.addScaledVector(direction, speed);
-        camera.position.add(offset);
-        controls?.target?.add(offset);
-      }
-      animId = requestAnimationFrame(tick);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) return;
-      const key = e.key.toLowerCase();
-      if (!movementKeys.has(key) && key !== 'shift') return;
-      keysPressed.current.add(key);
-      if (key === 'shift') {
-        const controls = fgRef.current?.controls();
-        if (controls) controls.mouseButtons.LEFT = THREE.MOUSE.PAN;
-      }
-      if (movementKeys.has(key) && animId === null) animId = requestAnimationFrame(tick);
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      keysPressed.current.delete(e.key.toLowerCase());
-      if (e.key === 'Shift') {
-        const controls = fgRef.current?.controls();
-        if (controls) controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
-      }
-      if (!hasMovement() && animId !== null) {
-        cancelAnimationFrame(animId);
-        animId = null;
-      }
-    };
-    const onBlur = () => {
-      keysPressed.current.clear();
-      if (animId !== null) cancelAnimationFrame(animId);
-      animId = null;
-      const controls = fgRef.current?.controls();
-      if (controls) controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    window.addEventListener('blur', onBlur);
-    return () => {
-      onBlur();
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      window.removeEventListener('blur', onBlur);
-    };
-  }, []);
+    if (!interaction || !graphElement.current) return;
+    const input = bindManualInput(graphElement.current, interaction);
+    return () => input.dispose();
+  }, [interaction]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -279,9 +215,12 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
 
   const galaxyCleanup = useRef<(() => void) | null>(null);
   const attachGraph = useCallback((fg: any) => {
+    detachHandSurface.current?.();
+    detachHandSurface.current = null;
     galaxyCleanup.current?.();
     galaxyCleanup.current = null;
     fgRef.current = fg;
+    setRenderer(fg);
     if (!fg) return;
     if (document.hidden) fg.pauseAnimation();
     const scene = fg.scene();
@@ -703,78 +642,116 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const getLinkCurveRotation = useCallback((link: any) =>
     hashId(getLinkKey(link)) / 4294967296 * Math.PI * 2, []);
 
-  const resetHandControls = useCallback(() => {
-    const previous = handHoverRef.current;
-    if (previous) {
-      setParticleColor(previous.object, previous.id === selectedNodeRef.current?.id
-        ? selectedParticleColor : nodeColorsRef.current.get(previous.id) || clusterPalette[0]);
-    }
-    handHoverRef.current = null;
-    handHoverSelectionRef.current.reset();
-    handHoverProgressRef.current = 0;
-    setHandHoveredNodeName(null);
-    const captured = handCameraControlsRef.current;
-    if (captured) {
-      captured.controls.enabled = captured.enabled;
-      captured.controls.enableDamping = captured.damping;
-      handCameraControlsRef.current = null;
-    }
-  }, []);
+  const selectHandNode = useRef(handleNodeClick);
+  selectHandNode.current = handleNodeClick;
 
-  useEffect(() => {
-    resetHandControls();
-    return resetHandControls;
-  }, [initialSlug, loading, resetHandControls]);
-
-  const handleHandOutput = useCallback((output: HandOutput) => {
-    const fg = fgRef.current;
-    if (!fg || loading || !graphDataRef.current) {
-      resetHandControls();
-      return;
-    }
-    const controls = fg.controls() as HandGraphControls;
-    if (output.motion) {
-      if (!handCameraControlsRef.current) {
-        handCameraControlsRef.current = { controls, enabled: controls.enabled, damping: controls.enableDamping };
+  useLayoutEffect(() => {
+    if (!interaction || !renderer) return;
+    const fg = renderer;
+    const controls = fg.controls();
+    const previousLeft = controls.mouseButtons.LEFT;
+    let intent: NavigationIntent | null = null;
+    let animId: number | null = null;
+    const direction = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    const offset = new THREE.Vector3();
+    let picked: HandGraphHit | null = null;
+    const tick = () => {
+      animId = null;
+      if (!intent?.keys.length) return;
+      const camera = fg.camera();
+      const speed = intent.shift ? 8 : 3;
+      camera.getWorldDirection(direction);
+      right.setFromMatrixColumn(camera.matrix, 0).normalize();
+      up.setFromMatrixColumn(camera.matrix, 1).normalize();
+      offset.set(0, 0, 0);
+      if (intent.keys.includes('a')) offset.addScaledVector(right, -speed);
+      if (intent.keys.includes('d')) offset.addScaledVector(right, speed);
+      if (intent.keys.includes('w')) offset.addScaledVector(up, speed);
+      if (intent.keys.includes('s')) offset.addScaledVector(up, -speed);
+      if (intent.keys.includes('q')) offset.addScaledVector(direction, -speed);
+      if (intent.keys.includes('e')) offset.addScaledVector(direction, speed);
+      camera.position.add(offset);
+      controls.target.add(offset);
+      animId = requestAnimationFrame(tick);
+    };
+    const surface: GraphSurface = {
+      viewport: () => viewport,
+      pick(point) {
+        picked = document.elementFromPoint(point.x, point.y)?.closest('[data-hand-ui]')
+          ? null : pickHandNode(fg.scene(), fg.camera(), point, viewport);
+        const node = graphDataRef.current?.nodes.find(node => node.id === picked?.id);
+        return node ? { id: node.id, name: node.name } : null;
+      },
+      aim(value) {
+        const hit = value.target && picked?.id === value.target.id ? picked : null;
+        if (hit?.id !== handHoverRef.current?.id) {
+          const previous = handHoverRef.current;
+          if (previous) setParticleColor(previous.object, previous.id === selectedNodeRef.current?.id
+            ? selectedParticleColor : nodeColorsRef.current.get(previous.id) || clusterPalette[0]);
+          handHoverRef.current = hit;
+          setHandHoveredNodeName(value.target?.name ?? null);
+          if (hit) setParticleColor(hit.object, selectedParticleColor);
+        }
+        if (handCursor.current) {
+          handCursor.current.hidden = !value.cursor;
+          if (value.cursor) handCursor.current.style.transform = `translate3d(${value.cursor.x}px, ${value.cursor.y}px, 0)`;
+        }
+        if (handHoverRing.current) handHoverRing.current.style.strokeDashoffset = String(56.55 * (1 - value.progress));
+      },
+      select(id) {
+        const node = graphDataRef.current?.nodes.find(node => node.id === id);
+        if (node) void selectHandNode.current(node);
+      },
+      captureHandMotion() {
+        const enabled = controls.enabled;
+        const damping = controls.enableDamping;
         controls.enabled = false;
         controls.enableDamping = false;
         controls.update();
-      }
-      applyHandMotion(fg.camera(), controls, output.motion, viewport);
-    } else if (handCameraControlsRef.current) {
-      const captured = handCameraControlsRef.current;
-      captured.controls.enabled = captured.enabled;
-      captured.controls.enableDamping = captured.damping;
-      handCameraControlsRef.current = null;
-    }
-    const pick = (point: { x: number; y: number } | null) => {
-      if (!point || document.elementFromPoint(point.x, point.y)?.closest('[data-hand-ui]')) return null;
-      return pickHandNode(fg.scene(), fg.camera(), point, viewport);
+        let released = false;
+        return {
+          apply(motion) { if (!released) applyHandMotion(fg.camera(), controls as HandGraphControls, motion, viewport); },
+          release() {
+            if (released) return;
+            released = true;
+            controls.enabled = enabled;
+            controls.enableDamping = damping;
+          },
+        };
+      },
+      keyboard(value) {
+        intent = value;
+        controls.mouseButtons.LEFT = value?.shift ? THREE.MOUSE.PAN : previousLeft;
+        if (value?.keys.length && animId === null) animId = requestAnimationFrame(tick);
+        if (!value?.keys.length && animId !== null) {
+          cancelAnimationFrame(animId);
+          animId = null;
+        }
+      },
     };
-    const hit = pick(output.cursor);
-    if (hit?.id !== handHoverRef.current?.id) {
-      const previous = handHoverRef.current;
-      if (previous) {
-        setParticleColor(previous.object, previous.id === selectedNodeRef.current?.id
-          ? selectedParticleColor : nodeColorsRef.current.get(previous.id) || clusterPalette[0]);
-      }
-      handHoverRef.current = hit;
-      const node = graphDataRef.current.nodes.find(node => node.id === hit?.id);
-      setHandHoveredNodeName(node?.name || null);
-      if (hit) setParticleColor(hit.object, selectedParticleColor);
+    handSurface.current = surface;
+    handTargetIds.current = new Set(graphDataRef.current?.nodes.map(node => node.id));
+    const detach = interaction.attach(surface);
+    detachHandSurface.current = detach;
+    return () => {
+      detach();
+      if (detachHandSurface.current === detach) detachHandSurface.current = null;
+      if (handSurface.current === surface) handSurface.current = null;
+      surface.keyboard(null);
+    };
+  }, [interaction, renderer, viewport]);
+
+  useLayoutEffect(() => {
+    graphDataRef.current = graphData;
+    const ids = new Set(graphData?.nodes.map(node => node.id));
+    if (interaction && handSurface.current && [...handTargetIds.current].some(id => !ids.has(id))) {
+      detachHandSurface.current?.();
+      detachHandSurface.current = interaction.attach(handSurface.current);
     }
-    if (output.gesture !== 'aiming' || output.motion || !output.cursor) {
-      handHoverSelectionRef.current.cancel(hit?.id || null);
-      handHoverProgressRef.current = 0;
-      return;
-    }
-    const selection = handHoverSelectionRef.current.step(hit?.id || null, performance.now());
-    handHoverProgressRef.current = selection.progress;
-    if (selection.select) {
-      const node = graphDataRef.current.nodes.find(node => node.id === selection.select);
-      if (node) void handleNodeClick(node);
-    }
-  }, [handleNodeClick, loading, resetHandControls, viewport]);
+    handTargetIds.current = ids;
+  }, [graphData, interaction]);
 
   const getNodeLabel = useCallback((node: any) => {
     const graphNode = node as GraphNode;
@@ -805,7 +782,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
     ch.counts?.contents ?? ch.length ?? '?';
 
   return (
-    <div className="relative w-full h-[100dvh]" onContextMenu={(e) => e.preventDefault()}>
+    <div ref={graphElement} tabIndex={-1} className="relative w-full h-[100dvh]" onContextMenu={(e) => e.preventDefault()}>
       <div data-hand-ui className={`absolute z-10 max-w-[calc(100vw-2rem)] sm:max-w-[calc(100vw-10rem)] flex flex-col gap-2 transition-all duration-700 ease-in-out ${
         graphData || loading ? 'top-4 left-4' : 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
       }`}>
@@ -1022,14 +999,19 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         <div className="mt-auto shrink-0 pointer-events-auto">
           <HandControlsPanel
             viewport={viewport}
-            graphKey={initialSlug}
             available={!loading && !!graphData && viewport.width >= 768}
-            hoveredNodeName={handHoveredNodeName}
-            hoverProgressRef={handHoverProgressRef}
-            onOutput={handleHandOutput}
-            onReset={resetHandControls}
+            onInteraction={setInteraction}
           />
         </div>
+      </div>
+
+      <div ref={handCursor} hidden aria-hidden="true" className="fixed left-0 top-0 z-30 pointer-events-none">
+        <svg viewBox="0 0 24 24" className="absolute -left-3 -top-3 h-6 w-6 text-[#e9dfc4]" fill="none">
+          <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.35" />
+          <circle ref={handHoverRing} cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" strokeDasharray="56.55" strokeDashoffset="56.55" transform="rotate(-90 12 12)" />
+          <circle cx="12" cy="12" r="1.5" fill="currentColor" />
+        </svg>
+        {handHoveredNodeName && <span className="absolute left-3 top-2 whitespace-nowrap bg-black/70 px-2 py-1 text-xs text-white font-sans">{handHoveredNodeName}</span>}
       </div>
 
       {!loading && graphData && (
