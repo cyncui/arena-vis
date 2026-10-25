@@ -9,6 +9,7 @@ Users enable the camera explicitly, pause or resume tracking, and use hand gestu
 - `hands-layout` keeps camera and navigation controls usable across viewports.
 - `hands-navigation` selects nodes and moves the graph using scripted hand results.
 - `hands-handoff` gives held keys, panel focus, pointer holds and wheel input priority over hands until fresh rearming.
+- `hands-back` goes back to the previous selection with a held two-finger pose, matching the sidebar Back button.
 - `hands-worker` initializes tracking and handles worker lifecycle behavior.
 - `hands-reference` teaches gestures before camera permission and highlights the current action beside the preview.
 
@@ -31,9 +32,10 @@ Run the matching command and capture stdout, stderr, and exit status:
 
 - `HAND_URL="$ARENA_VERIFY_URL" HAND_OUTPUT="$ARENA_VERIFY_OUTPUT/hands" node scripts/verify-hand-controls.cjs` proves camera lifecycle and responsive panel behavior. Preserve screenshots and `docs/hand-controls-browser-validation.json` outside the checkout.
 - `HAND_URL="$ARENA_VERIFY_URL" HAND_OUTPUT="$ARENA_VERIFY_OUTPUT/hand-navigation" node scripts/verify-hand-navigation.cjs` proves scripted gesture navigation, target feedback, and selection. Preserve `docs/hand-navigation-validation.json` and `aiming-reference.png`.
+- `HAND_URL="$ARENA_VERIFY_URL" HAND_OUTPUT="$ARENA_VERIFY_OUTPUT/hand-back" node scripts/verify-hand-back.cjs` proves the back pose's hold, ring progress, cancel, release lock, empty-stack no-op, and the visible Back button. Preserve `docs/hand-back-navigation-validation.json` and `back-hold.png`.
 - `HAND_URL="$ARENA_VERIFY_URL" node scripts/verify-hand-worker.cjs` checks worker behavior. Preserve `docs/hand-worker-validation.json`. Require `status: 'passed'` for each browser you claim. Exit code zero requires only Chrome to pass and can hide unavailable or failed WebKit coverage.
 
-For isolated logic, run `node scripts/test-hand-gestures.mjs`, `node scripts/test-hand-session.mjs`, `node scripts/test-hand-hover.mjs`, `node scripts/test-hand-graph.mjs`, or `node scripts/test-hand-interaction.mjs`. Record each outcome separately.
+For isolated logic, run `node scripts/test-hand-gestures.mjs`, `node scripts/test-hand-session.mjs`, `node scripts/test-hand-hover.mjs`, `node scripts/test-hand-graph.mjs`, `node scripts/test-hand-interaction.mjs`, or `node scripts/test-selection-history.mjs`. `node scripts/eval-back-gesture.mjs` replays recorded real-hand clips from `scripts/fixtures/hand-sessions/`; record them with `?record-hands` on `/explore`. Record each outcome separately.
 
 The lifecycle script opens and closes `gesture reference` with the keyboard before enabling the camera. It also captures `before-camera.png` and `short-desktop-active.png`, verifying stop controls remain reachable with expanded help at 1024 × 600. The gesture suite covers first-closure cancellation of a nearly completed dwell by either hand.
 

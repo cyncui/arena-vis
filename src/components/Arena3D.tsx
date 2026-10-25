@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import InterfaceIcon from './InterfaceIcon';
@@ -9,6 +9,7 @@ import HandControlsPanel from './HandControlsPanel';
 import { applyHandMotion, pickHandNode, type HandGraphHit, type HandGraphControls } from '@/lib/hand-controls/graph-adapter';
 import type { GraphSurface, HandInteraction, NavigationIntent } from '@/lib/hand-controls/interaction';
 import { bindManualInput } from '@/lib/hand-controls/dom-input';
+import { selectionReducer, type SelectionAction } from '@/lib/selection-history';
 
 import * as THREE from 'three';
 
@@ -141,8 +142,10 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const [graphData, setGraphData] = useState<GraphData | null>(null);
   const [loading, setLoading] = useState(!!initialSlug);
   const [error, setError] = useState<string | null>(null);
-  const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [history, setHistory] = useState<GraphNode[]>([]);
+  const [selection, dispatchSelection] = useReducer(selectionReducer<GraphNode>, { selected: null, history: [] });
+  const { selected: selectedNode, history } = selection;
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
   const [slug, setSlug] = useState(initialSlug);
   const [exploredBlocks, setExploredBlocks] = useState<Set<string>>(new Set());
   const [sidebarMinimized, setSidebarMinimized] = useState(false);
@@ -153,6 +156,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const handHoverRef = useRef<HandGraphHit | null>(null);
   const handCursor = useRef<HTMLDivElement>(null);
   const handHoverRing = useRef<SVGCircleElement>(null);
+  const backRing = useRef<SVGCircleElement>(null);
   const [interaction, setInteraction] = useState<HandInteraction | null>(null);
   const [renderer, setRenderer] = useState<any>(null);
   const detachHandSurface = useRef<(() => void) | null>(null);
@@ -284,8 +288,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
       }
 
       setGraphData(data.graphData);
-      setSelectedNode(null);
-      setHistory([]);
+      dispatchSelection({ type: 'clear' });
       setExploredBlocks(new Set());
     } catch (err) {
       setError('Failed to fetch data');
@@ -309,8 +312,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
       }
 
       setGraphData(data.graphData);
-      setSelectedNode(null);
-      setHistory([]);
+      dispatchSelection({ type: 'clear' });
       setExploredBlocks(new Set());
     } catch (err) {
       setError('Failed to fetch user data');
@@ -415,27 +417,15 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const selectNode = useCallback((node: GraphNode) => {
     setSidebarMinimized(false);
     setHistoryCollapsed(true);
-    setSelectedNode(prev => {
-      if (prev && prev.id !== node.id) {
-        setHistory(h => {
-          if (h.length > 0 && h[h.length - 1].id === prev.id) return h;
-          return [...h, prev];
-        });
-      }
-      return node;
-    });
+    dispatchSelection({ type: 'select', node });
   }, []);
 
-  const jumpToHistory = useCallback((index: number) => {
+  const restoreSelection = useCallback((action: Extract<SelectionAction<GraphNode>, { type: 'jump' | 'back' }>) => {
     setHistoryCollapsed(true);
     const prev = prevSelectedFgNodeRef.current;
     if (prev) setParticleColor(prev, nodeColorsRef.current.get(prev.id) || clusterPalette[0]);
     prevSelectedFgNodeRef.current = null;
-    setHistory(h => {
-      const target = h[index];
-      setSelectedNode(target);
-      return h.slice(0, index);
-    });
+    dispatchSelection(action);
   }, []);
 
   const handleNodeClick = useCallback(async (node: any) => {
@@ -513,53 +503,47 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const handleNodeRightClick = useCallback((node: any, event: MouseEvent) => {
     event.preventDefault();
     const graphNode = node as GraphNode;
+    const prev = graphDataRef.current;
+    if (!prev) return;
 
-    setGraphData(prev => {
-      if (!prev) return prev;
+    // Find parent IDs (nodes that link TO this node)
+    const parentIds = new Set<string>();
+    for (const link of prev.links) {
+      const target = typeof link.target === 'object' ? (link.target as any).id : link.target;
+      const source = typeof link.source === 'object' ? (link.source as any).id : link.source;
+      if (target === graphNode.id) parentIds.add(source);
+    }
 
-      // Find parent IDs (nodes that link TO this node)
-      const parentIds = new Set<string>();
+    // BFS to collect all descendants (excluding parents)
+    const toRemove = new Set<string>([graphNode.id]);
+    const queue = [graphNode.id];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
       for (const link of prev.links) {
-        const target = typeof link.target === 'object' ? (link.target as any).id : link.target;
         const source = typeof link.source === 'object' ? (link.source as any).id : link.source;
-        if (target === graphNode.id) parentIds.add(source);
-      }
-
-      // BFS to collect all descendants (excluding parents)
-      const toRemove = new Set<string>([graphNode.id]);
-      const queue = [graphNode.id];
-      while (queue.length > 0) {
-        const current = queue.shift()!;
-        for (const link of prev.links) {
-          const source = typeof link.source === 'object' ? (link.source as any).id : link.source;
-          const target = typeof link.target === 'object' ? (link.target as any).id : link.target;
-          // Follow links outward from current, but don't traverse back to parents of the original node
-          if (source === current && !toRemove.has(target) && !parentIds.has(target)) {
-            toRemove.add(target);
-            queue.push(target);
-          }
-          if (target === current && !toRemove.has(source) && !parentIds.has(source)) {
-            toRemove.add(source);
-            queue.push(source);
-          }
+        const target = typeof link.target === 'object' ? (link.target as any).id : link.target;
+        // Follow links outward from current, but don't traverse back to parents of the original node
+        if (source === current && !toRemove.has(target) && !parentIds.has(target)) {
+          toRemove.add(target);
+          queue.push(target);
+        }
+        if (target === current && !toRemove.has(source) && !parentIds.has(source)) {
+          toRemove.add(source);
+          queue.push(source);
         }
       }
-
-      return {
-        nodes: prev.nodes.filter(n => !toRemove.has(n.id)),
-        links: prev.links.filter(l => {
-          const s = typeof l.source === 'object' ? (l.source as any).id : l.source;
-          const t = typeof l.target === 'object' ? (l.target as any).id : l.target;
-          return !toRemove.has(s) && !toRemove.has(t);
-        }),
-      };
-    });
-
-    // Clear selection if the removed node was selected
-    if (selectedNode?.id === graphNode.id) {
-      setSelectedNode(null);
     }
-  }, [selectedNode]);
+
+    setGraphData(data => data && {
+      nodes: data.nodes.filter(n => !toRemove.has(n.id)),
+      links: data.links.filter(l => {
+        const s = typeof l.source === 'object' ? (l.source as any).id : l.source;
+        const t = typeof l.target === 'object' ? (l.target as any).id : l.target;
+        return !toRemove.has(s) && !toRemove.has(t);
+      }),
+    });
+    dispatchSelection({ type: 'remove', ids: toRemove });
+  }, []);
 
   const handleNodeHover = useCallback((node: any, prevNode: any) => {
     for (const [target, opacity] of [[prevNode, 0.4], [node, 0.8]]) {
@@ -704,6 +688,15 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         const node = graphDataRef.current?.nodes.find(node => node.id === id);
         if (node) void selectHandNode.current(node);
       },
+      backTarget() {
+        const { history } = selectionRef.current;
+        const node = history[history.length - 1];
+        return node ? { id: node.id, name: node.name } : null;
+      },
+      back({ progress, commit }) {
+        if (backRing.current) backRing.current.style.strokeDashoffset = String(56.55 * (1 - progress));
+        if (commit) restoreSelection({ type: 'back' });
+      },
       captureHandMotion() {
         const enabled = controls.enabled;
         const damping = controls.enableDamping;
@@ -741,7 +734,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
       if (handSurface.current === surface) handSurface.current = null;
       surface.keyboard(null);
     };
-  }, [interaction, renderer, viewport]);
+  }, [interaction, renderer, viewport, restoreSelection]);
 
   useLayoutEffect(() => {
     graphDataRef.current = graphData;
@@ -780,6 +773,58 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
 
   const channelItemCount = (ch: ArenaChannel) =>
     ch.counts?.contents ?? ch.length ?? '?';
+
+  const pathTrail = history.length > 0 && (
+    <div className="px-3 pt-2 pb-2 border-b border-white/10">
+      <button
+        onClick={() => setHistoryCollapsed(h => !h)}
+        aria-expanded={!historyCollapsed}
+        className="text-white/40 hover:text-white/60 text-[10px] uppercase tracking-wider mb-1.5 font-sans flex items-center gap-1 transition-colors"
+      >
+        <InterfaceIcon name="chevron-down" className="transition-transform" style={{ transform: historyCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+        Path ({history.length})
+      </button>
+      {!historyCollapsed && (
+        <div className="flex flex-wrap gap-1 items-center">
+          {history.map((node, i) => (
+            <span key={`${node.id}-${i}`} className="flex items-center gap-1">
+              <button
+                onClick={() => restoreSelection({ type: 'jump', index: i })}
+                className="text-sm px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 transition-colors flex items-center gap-1 max-w-[100px] font-pixel"
+                style={{ color: nodeColors.get(node.id) || clusterPalette[0] }}
+                title={node.name}
+              >
+                <InterfaceIcon name={node.type === 'channel' ? 'channel' : 'block'} />
+                <span className="min-w-0 truncate">{node.name.substring(0, 20)}{node.name.length > 20 ? '…' : ''}</span>
+              </button>
+              <InterfaceIcon name="chevron-right" className="text-white/20" />
+            </span>
+          ))}
+          {selectedNode && (
+            <span className="text-sm text-white/80 font-pixel flex items-center gap-1 max-w-[200px]" title={selectedNode.name}>
+              <InterfaceIcon name={selectedNode.type === 'channel' ? 'channel' : 'block'} />
+              <span className="min-w-0 truncate">{selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}</span>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const backButton = history.length > 0 && (
+    <button
+      onClick={() => restoreSelection({ type: 'back' })}
+      className="text-white/50 hover:text-white text-[10px] mb-2 flex items-center gap-1 font-sans uppercase"
+    >
+      <span className="relative inline-flex">
+        <svg viewBox="0 0 20 20" aria-hidden="true" className="pointer-events-none absolute -left-0.5 -top-0.5 h-5 w-5 text-[#e9dfc4]" fill="none">
+          <circle ref={backRing} cx="10" cy="10" r="9" stroke="currentColor" strokeWidth="1.5" strokeDasharray="56.55" strokeDashoffset="56.55" transform="rotate(-90 10 10)" />
+        </svg>
+        <InterfaceIcon name="arrow-left" />
+      </span>
+      Back
+    </button>
+  );
 
   return (
     <div ref={graphElement} tabIndex={-1} className="relative w-full h-[100dvh]" onContextMenu={(e) => e.preventDefault()}>
@@ -826,6 +871,13 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
           <div role="alert" className="text-red-400 text-sm font-pixel">{error}</div>
         )}
 
+        {!selectedNode && history.length > 0 && (
+          <div className="w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
+            {pathTrail}
+            <div className="px-4 pt-3 pb-1">{backButton}</div>
+          </div>
+        )}
+
         {selectedNode && (
           <div className="w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
             <div className="flex items-center justify-between px-3 py-2 border-b border-white/10">
@@ -843,51 +895,10 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
 
             {!sidebarMinimized && (
               <>
-                {history.length > 0 && (
-                  <div className="px-3 pt-2 pb-2 border-b border-white/10">
-                    <button
-                      onClick={() => setHistoryCollapsed(h => !h)}
-                      aria-expanded={!historyCollapsed}
-                      className="text-white/40 hover:text-white/60 text-[10px] uppercase tracking-wider mb-1.5 font-sans flex items-center gap-1 transition-colors"
-                    >
-                      <InterfaceIcon name="chevron-down" className="transition-transform" style={{ transform: historyCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
-                      Path ({history.length})
-                    </button>
-                    {!historyCollapsed && (
-                      <div className="flex flex-wrap gap-1 items-center">
-                        {history.map((node, i) => (
-                          <span key={`${node.id}-${i}`} className="flex items-center gap-1">
-                            <button
-                              onClick={() => jumpToHistory(i)}
-                              className="text-sm px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 transition-colors flex items-center gap-1 max-w-[100px] font-pixel"
-                              style={{ color: nodeColors.get(node.id) || clusterPalette[0] }}
-                              title={node.name}
-                            >
-                              <InterfaceIcon name={node.type === 'channel' ? 'channel' : 'block'} />
-                              <span className="min-w-0 truncate">{node.name.substring(0, 20)}{node.name.length > 20 ? '…' : ''}</span>
-                            </button>
-                            <InterfaceIcon name="chevron-right" className="text-white/20" />
-                          </span>
-                        ))}
-                        <span className="text-sm text-white/80 font-pixel flex items-center gap-1 max-w-[200px]" title={selectedNode.name}>
-                          <InterfaceIcon name={selectedNode.type === 'channel' ? 'channel' : 'block'} />
-                          <span className="min-w-0 truncate">{selectedNode.name.substring(0, 20)}{selectedNode.name.length > 20 ? '…' : ''}</span>
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
+                {pathTrail}
 
                 <div className="p-4">
-                  {history.length > 0 && (
-                    <button
-                      onClick={() => jumpToHistory(history.length - 1)}
-                      className="text-white/50 hover:text-white text-[10px] mb-2 flex items-center gap-1 font-sans uppercase"
-                    >
-                      <InterfaceIcon name="arrow-left" />
-                      Back
-                    </button>
-                  )}
+                  {backButton}
                   <h3 className="text-white font-bold mb-2 font-pixel uppercase flex items-center gap-1.5">
                     <InterfaceIcon name={selectedNode.type === 'channel' ? 'channel' : 'block'} />
                     {selectedNode.type === 'channel' ? 'Channel' : 'Block'}
@@ -967,7 +978,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                       const prev = prevSelectedFgNodeRef.current;
                       if (prev) setParticleColor(prev, nodeColorsRef.current.get(prev.id) || clusterPalette[0]);
                       prevSelectedFgNodeRef.current = null;
-                      setSelectedNode(null); setHistory([]); setSidebarMinimized(false);
+                      dispatchSelection({ type: 'clear' }); setSidebarMinimized(false);
                     }}
                     className="text-white/30 hover:text-white/60 transition-colors text-sm font-pixel uppercase w-full text-center"
                   >

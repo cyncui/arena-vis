@@ -73,7 +73,7 @@ export default function NavigationGuide({ onClose }: { onClose: () => void }) {
 
       <div className="border-t border-white/10 px-4 py-4">
         <p className="mb-3 font-pixel text-[10px] tracking-wider text-white/50">hands</p>
-        <p className="mb-2 text-[11px] leading-relaxed">hover until the ring fills to select. make a fist and move it to pan. pinch thumb and index with your other fingers open; move toward the camera to zoom in or away to zoom out. release to stop. drag a pinch sideways to orbit. pinch with both hands and move them together to pan; spread them to zoom in or bring them together to zoom out. open all visible hands to resume after tracking stops.</p>
+        <p className="mb-2 text-[11px] leading-relaxed">hover until the ring fills to select. make a fist and move it to pan. pinch thumb and index with your other fingers open; move toward the camera to zoom in or away to zoom out. release to stop. drag a pinch sideways to orbit. pinch with both hands and move them together to pan; spread them to zoom in or bring them together to zoom out. hold index and middle fingers up with the others curled until the ring around back fills to return to your previous selection; open your hand to cancel. open all visible hands to resume after tracking stops.</p>
         <p className="text-[10px] leading-relaxed text-white/55">processed on this device. video and landmarks are never uploaded or saved. switching tabs stops the camera.</p>
       </div>
 

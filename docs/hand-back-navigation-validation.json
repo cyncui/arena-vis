@@ -1,0 +1,13 @@
+{
+  "syntheticLandmarks": true,
+  "actualGraphCamera": true,
+  "backPoseRestoresPrevious": true,
+  "backHoldNamesTarget": true,
+  "backRingShowsProgress": true,
+  "backCancelsOnOpenHand": true,
+  "backRequiresRelease": true,
+  "backDoesNotRepeat": true,
+  "backNoopAtRoot": true,
+  "visibleBackButtonWorks": true,
+  "errors": []
+}

@@ -5,9 +5,11 @@ export type HandViewport = { width: number; height: number };
 export type HandMotion =
   | { kind: 'orbit'; dx: number; dy: number }
   | { kind: 'transform'; dx: number; dy: number; scale: number };
-export type HandGesture = 'idle' | 'aiming' | 'pinch' | 'pan' | 'orbit' | 'zoom' | 'two-hand' | 'locked';
+export type HandGesture = 'idle' | 'aiming' | 'pinch' | 'pan' | 'orbit' | 'zoom' | 'two-hand' | 'locked' | 'back';
 export type HandOutput = {
   cursor: Point2 | null;
   gesture: HandGesture;
   motion: HandMotion | null;
+  progress: number;
+  command: 'back' | null;
 };

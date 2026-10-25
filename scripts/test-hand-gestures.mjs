@@ -6,7 +6,7 @@ const require = createRequire(import.meta.url);
 const ts = require('typescript');
 const source = readFileSync(new URL('../src/lib/hand-controls/gestures.ts', import.meta.url), 'utf8');
 const javascript = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
-const { HandGestureController } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`);
+const { HandGestureController, backHoldMs } = await import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`);
 const hoverSource = readFileSync(new URL('../src/lib/hand-controls/hover-selection.ts', import.meta.url), 'utf8');
 const hoverJavascript = ts.transpileModule(hoverSource, { compilerOptions: { module: ts.ModuleKind.ES2022, target: ts.ScriptTarget.ES2022 } }).outputText;
 const { HoverSelectionController } = await import(`data:text/javascript;base64,${Buffer.from(hoverJavascript).toString('base64')}`);
@@ -19,8 +19,8 @@ const hand = (x = 0.5, ratio = 0.7, width = 0.1, y = 0.5) => {
   points[4] = { x: x + ratio * width, y: y - 0.2, z: 0 };
   return points;
 };
-const fixture = () => {
-  const controller = new HandGestureController();
+const fixture = options => {
+  const controller = new HandGestureController(options);
   let timestamp = 0;
   return {
     controller,
@@ -194,23 +194,23 @@ check('closing a pinch cancels selection before navigation is confirmed', () => 
   const f = fixture();
   assert.deepEqual(f.frame([hand()]).cursor, { x: 500, y: 240 });
   const closing = f.frame([hand(0.5, 0.1)]);
-  assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null });
+  assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null, progress: 0, command: null });
   assert.deepEqual(f.frame([hand(0.5, 0.1)], 0), closing);
   assert.equal(f.frame([hand(0.5, 0.1)]).gesture, 'pinch');
   f.frame([hand()]);
-  assert.deepEqual(f.frame([hand()]), { cursor: { x: 500, y: 240 }, gesture: 'aiming', motion: null });
+  assert.deepEqual(f.frame([hand()]), { cursor: { x: 500, y: 240 }, gesture: 'aiming', motion: null, progress: 0, command: null });
 });
 check('a rejected pinch resumes selection from an open hand', () => {
   const f = fixture();
   f.frame([hand()]);
-  assert.deepEqual(f.frame([hand(0.5, 0.1)]), { cursor: null, gesture: 'aiming', motion: null });
-  assert.deepEqual(f.frame([hand()]), { cursor: { x: 500, y: 240 }, gesture: 'aiming', motion: null });
+  assert.deepEqual(f.frame([hand(0.5, 0.1)]), { cursor: null, gesture: 'aiming', motion: null, progress: 0, command: null });
+  assert.deepEqual(f.frame([hand()]), { cursor: { x: 500, y: 240 }, gesture: 'aiming', motion: null, progress: 0, command: null });
 });
 check('closing a fist cancels selection before pan is confirmed', () => {
   const f = fixture();
   assert.deepEqual(f.frame([hand()]).cursor, { x: 500, y: 240 });
   const closing = f.frame([fist()]);
-  assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null });
+  assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null, progress: 0, command: null });
   assert.deepEqual(f.frame([fist()], 0), closing);
   assert.equal(f.frame([fist()]).gesture, 'pan');
   f.frame([hand()]);
@@ -222,7 +222,7 @@ check('either hand starting navigation cancels aiming on the primary hand', () =
     const f = fixture();
     assert.deepEqual(f.frame([hand(0.3), hand(0.7)]).cursor, { x: 700, y: 240 });
     const closing = f.frame([hand(0.3), closingHand]);
-    assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null });
+    assert.deepEqual(closing, { cursor: null, gesture: 'aiming', motion: null, progress: 0, command: null });
     assert.deepEqual(f.frame([hand(0.3), closingHand], 0), closing);
     const confirmed = f.frame([hand(0.3), closingHand]);
     assert.equal(confirmed.gesture, expectedGesture);
@@ -390,7 +390,7 @@ check('stale frames never move the camera or select', () => {
   f.frame([hand(0.5, 0.1)]);
   f.frame([hand(0.5, 0.1)]);
   const stale = f.frame([hand(0.6, 0.1)], 50, 201);
-  assert.deepEqual(stale, { cursor: null, gesture: 'locked', motion: null });
+  assert.deepEqual(stale, { cursor: null, gesture: 'locked', motion: null, progress: 0, command: null });
   assert.equal(f.frame([hand(0.6, 0.1)]).gesture, 'locked');
 });
 check('a long gap between fresh frames resets anchors', () => {
@@ -434,5 +434,77 @@ check('duplicate frame timestamps do not confirm a pinch', () => {
   f.frame([hand(0.5, 0.1)]);
   assert.equal(f.frame([hand(0.5, 0.1)], 0).gesture, 'aiming');
   assert.equal(f.frame([hand(0.5, 0.1)]).gesture, 'pinch');
+});
+const fingers = (x = 0.5, y = 0.5, width = 0.1, extended = [8, 12, 16, 20]) => {
+  const points = hand(x, 0.7, width, y);
+  for (const tip of [8, 12, 16, 20]) {
+    points[tip - 2] = { x, y: y - width, z: 0 };
+    points[tip] = { x, y: y - width * (extended.includes(tip) ? 2 : 0.5), z: 0 };
+  }
+  return points;
+};
+const victory = (x, y, width) => fingers(x, y, width, [8, 12]);
+const hold = (f, hands, frames) => Array.from({ length: frames }, () => f.frame(hands));
+check('a held two-finger pose fills progress and commits back once after the hold', () => {
+  for (const options of [undefined, { backHoldMs: 400 }]) {
+    const f = fixture(options);
+    f.frame([fingers()]);
+    const outputs = hold(f, [victory()], 40);
+    const started = outputs.findIndex(output => output.gesture === 'back');
+    const committed = outputs.findIndex(output => output.command === 'back');
+    assert.equal(outputs.filter(output => output.command === 'back').length, 1);
+    assert.equal((committed - started) * 50, options?.backHoldMs ?? backHoldMs);
+    assert.deepEqual(outputs[committed], { cursor: null, gesture: 'back', motion: null, progress: 1, command: 'back' });
+    const filling = outputs.slice(started, committed).map(output => output.progress);
+    assert.equal(filling[0], 0);
+    assert(filling.every((progress, index) => progress < 1 && (index === 0 || progress > filling[index - 1])));
+  }
+});
+check('opening the hand during the hold cancels without a command', () => {
+  const f = fixture();
+  f.frame([fingers()]);
+  const held = hold(f, [victory()], 8);
+  assert.equal(held.at(-1).gesture, 'back');
+  const opened = hold(f, [fingers()], 30);
+  assert(opened.every(output => output.command === null));
+  assert.equal(opened.at(-1).gesture, 'aiming');
+  assert.deepEqual(opened.at(-1).cursor, { x: 500, y: 240 });
+});
+check('fist, pinch, and open hands never produce back', () => {
+  for (const pose of [hand(), fingers(), hand(0.5, 0.1), fist(), fingers(0.5, 0.5, 0.1, [8]), fingers(0.5, 0.5, 0.1, [8, 12, 16])]) {
+    const f = fixture();
+    const outputs = hold(f, [pose], 40);
+    assert(outputs.every(output => output.gesture !== 'back' && output.command === null && output.progress === 0));
+  }
+});
+check('a fist during the hold pans instead of going back', () => {
+  const f = fixture();
+  f.frame([fingers()]);
+  hold(f, [victory()], 6);
+  const outputs = hold(f, [fist()], 30);
+  assert(outputs.every(output => output.command === null));
+  assert.equal(outputs.at(-1).gesture, 'pan');
+});
+check('a held pose after commit does not repeat until an open-hand release', () => {
+  const f = fixture();
+  f.frame([fingers()]);
+  const first = hold(f, [victory()], 80);
+  assert.equal(first.filter(output => output.command === 'back').length, 1);
+  assert.equal(first.at(-1).gesture, 'locked');
+  hold(f, [fingers()], 2);
+  const second = hold(f, [victory()], 40);
+  assert.equal(second.filter(output => output.command === 'back').length, 1);
+});
+check('a raw back pose hides the cursor before confirmation and through the hold', () => {
+  const f = fixture();
+  assert.deepEqual(f.frame([fingers()]).cursor, { x: 500, y: 240 });
+  assert.deepEqual(f.frame([victory()]), { cursor: null, gesture: 'aiming', motion: null, progress: 0, command: null });
+  assert(hold(f, [victory()], 10).every(output => output.cursor === null && output.gesture === 'back'));
+});
+check('either hand can hold the back pose', () => {
+  const f = fixture();
+  f.frame([fingers(0.3), fingers(0.7)]);
+  const outputs = hold(f, [fingers(0.3), victory(0.7)], 40);
+  assert.equal(outputs.filter(output => output.command === 'back').length, 1);
 });
 console.log(JSON.stringify({ passed: true, cases }, null, 2));

@@ -25,12 +25,14 @@ const hand = (x = 0.5, ratio = 0.7) => {
   return points;
 };
 function surface() {
-  const state = { aim: null, keyboard: null, selected: [], motions: [], enabled: true, damping: false, releases: 0 };
+  const state = { aim: null, keyboard: null, selected: [], motions: [], enabled: true, damping: false, releases: 0, backTarget: { id: 'p', name: 'previous' }, backs: [] };
   return { state, port: {
     viewport: () => ({ width: 1000, height: 800 }),
     pick: () => ({ id: 'a', name: 'alpha' }),
     aim: value => { state.aim = value; },
     select: id => state.selected.push(id),
+    backTarget: () => state.backTarget,
+    back: value => state.backs.push(value),
     keyboard: intent => { state.keyboard = intent; },
     captureHandMotion() {
       const enabled = state.enabled;
@@ -89,6 +91,14 @@ function fixture({ deferred = false } = {}) {
     pointer(pointerId, phase = 'down') { owner.manual({ kind: 'pointer', pointerId, phase }); },
   };
 }
+const victory = () => {
+  const points = hand();
+  for (const tip of [8, 12, 16, 20]) {
+    points[tip - 2] = { x: 0.5, y: 0.4, z: 0 };
+    points[tip] = { x: 0.5, y: tip <= 12 ? 0.3 : 0.45, z: 0 };
+  }
+  return points;
+};
 const cases = [];
 async function check(name, run) { await run(); cases.push(name); }
 
@@ -511,4 +521,45 @@ await check('dom ui wheel cancels motion and window blur releases all manual hol
   binding.dispose();
 });
 
+await check('holding the back pose streams progress and commits back once', async () => {
+  const f = fixture();
+  await f.owner.camera('start');
+  f.open();
+  for (let index = 0; index < 8; index++) f.frame([victory()]);
+  assert.equal(f.view.hand.gesture, 'back');
+  assert.deepEqual(f.view.hand.target, { id: 'p', name: 'previous' });
+  assert(f.view.hand.progress > 0 && f.view.hand.progress < 1);
+  assert.equal(f.graph.state.backs.at(-1).progress, f.view.hand.progress);
+  assert.equal(f.graph.state.aim.cursor, null);
+  for (let index = 0; index < 40; index++) f.frame([victory()]);
+  assert.deepEqual(f.graph.state.backs.filter(value => value.commit), [{ progress: 1, commit: true }]);
+  assert.deepEqual(f.graph.state.backs.at(-1), { progress: 0, commit: false });
+  assert.deepEqual(f.graph.state.selected, []);
+});
+await check('an empty back stack never commits and shows no progress', async () => {
+  const f = fixture();
+  f.graph.state.backTarget = null;
+  await f.owner.camera('start');
+  f.open();
+  for (let index = 0; index < 8; index++) f.frame([victory()]);
+  assert.equal(f.view.hand.gesture, 'back');
+  assert.equal(f.view.hand.target, null);
+  assert.equal(f.view.hand.progress, 0);
+  for (let index = 0; index < 40; index++) f.frame([victory()]);
+  assert(f.graph.state.backs.length > 0);
+  assert(f.graph.state.backs.every(value => !value.commit && value.progress === 0));
+});
+await check('manual input or ui focus during the hold cancels back', async () => {
+  for (const interrupt of [f => f.key('w'), f => f.owner.manual({ kind: 'focus', scope: 'ui' }), f => f.pointer(1)]) {
+    const f = fixture();
+    await f.owner.camera('start');
+    f.open();
+    for (let index = 0; index < 8; index++) f.frame([victory()]);
+    assert(f.graph.state.backs.at(-1).progress > 0);
+    interrupt(f);
+    assert.deepEqual(f.graph.state.backs.at(-1), { progress: 0, commit: false });
+    for (let index = 0; index < 40; index++) f.frame([victory()]);
+    assert(f.graph.state.backs.every(value => !value.commit));
+  }
+});
 console.log(JSON.stringify({ passed: cases.length, cases }, null, 2));

@@ -42,6 +42,8 @@ export interface GraphSurface {
   pick(point: Point2): Target | null;
   aim(value: Readonly<{ cursor: Point2 | null; target: Target | null; progress: number }>): void;
   select(nodeId: string): void;
+  backTarget(): Target | null;
+  back(value: Readonly<{ progress: number; commit: boolean }>): void;
   captureHandMotion(): HandMotionLease;
   keyboard(intent: NavigationIntent | null): void;
 }
@@ -74,6 +76,7 @@ export function createHandInteraction(dependencies: { tracking: TrackingFactory;
   let camera: CameraView = { phase: 'idle' };
   let hand: HandView = { phase: 'unavailable', reason: 'camera' };
   let lastView = '';
+  let backSurface: GraphSurface | null = null;
 
   const blocked = () => keys.size > 0 || pointers.size > 0;
   const unavailable = (): HandView | null => {
@@ -95,6 +98,11 @@ export function createHandInteraction(dependencies: { tracking: TrackingFactory;
       listener(view);
     }
   };
+  const clearBack = () => {
+    const surface = backSurface;
+    backSurface = null;
+    surface?.back({ progress: 0, commit: false });
+  };
   const release = (current: Attachment | null) => {
     const lease = current?.lease;
     if (current) current.lease = null;
@@ -109,6 +117,7 @@ export function createHandInteraction(dependencies: { tracking: TrackingFactory;
     const current = attachment;
     release(current);
     current?.surface.aim(emptyAim);
+    clearBack();
   };
   const keyboard = () => {
     const intent = focus === 'graph' && environment.visible && keys.size
@@ -144,6 +153,8 @@ export function createHandInteraction(dependencies: { tracking: TrackingFactory;
       hover.reset();
       current.surface.aim(emptyAim);
       if (!active()) return;
+      clearBack();
+      if (!active()) return;
       hand = { phase: 'yielded', reason: 'release-required' };
       publish();
       return;
@@ -157,16 +168,27 @@ export function createHandInteraction(dependencies: { tracking: TrackingFactory;
       current.lease.apply(output.motion);
     } else release(current);
     if (!active()) return;
+    const back = output.gesture === 'back';
     const cursor = output.gesture === 'aiming' && !output.motion ? output.cursor : null;
-    const target = cursor ? current.surface.pick(cursor) : null;
+    const target = back ? current.surface.backTarget() : cursor ? current.surface.pick(cursor) : null;
     if (!active()) return;
     if (!cursor) hover.cancel(null);
     const selection = cursor ? hover.step(target?.id ?? null, dependencies.now()) : { select: null, progress: 0 };
-    current.surface.aim({ cursor, target, progress: selection.progress });
+    current.surface.aim(back ? emptyAim : { cursor, target, progress: selection.progress });
     if (!active()) return;
-    hand = { phase: 'ready', gesture: output.gesture, target, progress: selection.progress };
+    const progress = back ? target ? output.progress : 0 : selection.progress;
+    if (back) {
+      backSurface = progress ? current.surface : null;
+      current.surface.back({ progress, commit: false });
+    } else clearBack();
+    if (!active()) return;
+    hand = { phase: 'ready', gesture: output.gesture, target, progress };
     publish();
-    if (active() && selection.select) current.surface.select(selection.select);
+    if (!active()) return;
+    if (back && output.command === 'back' && target) {
+      backSurface = current.surface;
+      current.surface.back({ progress: 1, commit: true });
+    } else if (selection.select) current.surface.select(selection.select);
   };
   return {
     async camera(action) {
