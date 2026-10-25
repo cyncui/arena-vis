@@ -10,6 +10,9 @@ type TrackedHand = {
   fist: boolean;
   rawFist: boolean;
   fistConfirmation: number;
+  back: boolean;
+  rawBack: boolean;
+  backConfirmation: number;
   pinched: boolean;
   confirmation: number;
 };
@@ -20,7 +23,8 @@ type GestureState =
   | { kind: 'pan'; hand: number; previous: Point2 }
   | { kind: 'orbit'; hand: number; previous: Point2 }
   | { kind: 'zoom'; hand: number; previousWidth: number }
-  | { kind: 'two-hand'; midpoint: Point2; separation: number };
+  | { kind: 'two-hand'; midpoint: Point2; separation: number }
+  | { kind: 'back'; hand: number; startedAt: number };
 
 const distance = (a: Point2, b: Point2) => Math.hypot(a.x - b.x, a.y - b.y);
 const midpoint = (a: Point2, b: Point2): Point2 => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
@@ -31,10 +35,16 @@ const smooth = (previous: Point2, current: Point2, alpha: number): Point2 => ({
   y: previous.y + (current.y - previous.y) * alpha,
 });
 const palmOf = (hand: Landmark[]) => midpoint(hand[5], hand[17]);
-const isFist = (hand: Landmark[]) => [8, 12, 16, 20].every(tip => {
+const reach = (hand: Landmark[], tip: number) => {
   const jointDistance = distance(hand[tip - 2], hand[0]);
-  return jointDistance > 0.001 && distance(hand[tip], hand[0]) < jointDistance * 0.9;
-});
+  return jointDistance > 0.001 ? distance(hand[tip], hand[0]) / jointDistance : NaN;
+};
+const curledReach = 0.9;
+const extendedReach = 1.15;
+export const backHoldMs = 650;
+const isFist = (hand: Landmark[]) => [8, 12, 16, 20].every(tip => reach(hand, tip) < curledReach);
+export const isBackPose = (hand: Landmark[]) => [8, 12].every(tip => reach(hand, tip) > extendedReach) && [16, 20].every(tip => reach(hand, tip) < curledReach);
+const closing = (hand: TrackedHand) => hand.rawFist || hand.rawBack || hand.rawRatio <= 0.25;
 const pinchRatio = (hand: Landmark[]) => distance(hand[4], hand[8]) / Math.max(distance(hand[5], hand[17]), 0.001);
 
 export class HandGestureController {
@@ -43,6 +53,11 @@ export class HandGestureController {
   private lastTimestamp: number | null = null;
   private nextId = 0;
   private primaryId: number | null = null;
+  private readonly backHoldMs: number;
+
+  constructor({ backHoldMs: holdMs = backHoldMs }: Readonly<{ backHoldMs?: number }> = {}) {
+    this.backHoldMs = holdMs;
+  }
 
   reset(requireRelease = false): void {
     this.state = requireRelease ? { kind: 'locked', releaseFrames: 0 } : { kind: 'aiming' };
@@ -52,20 +67,20 @@ export class HandGestureController {
   }
 
   step(frame: HandFrame, viewport: HandViewport, now: number): HandOutput {
-    const output: HandOutput = { cursor: null, gesture: 'idle', motion: null };
+    const output: HandOutput = { cursor: null, gesture: 'idle', motion: null, progress: 0, command: null };
     if (now - frame.timestamp > 200 || frame.hands.length === 0) {
       this.reset(true);
       return { ...output, gesture: 'locked' };
     }
     if (this.lastTimestamp !== null && frame.timestamp <= this.lastTimestamp) {
       const primary = this.hands.find(hand => hand.id === this.primaryId);
-      const closing = this.state.kind === 'aiming' && this.hands.some(hand => hand.rawFist || hand.rawRatio <= 0.25);
-      return { ...output, cursor: primary && !closing ? pixels(primary.cursor, viewport) : null, gesture: this.state.kind };
+      const hidden = this.state.kind === 'back' || (this.state.kind === 'aiming' && this.hands.some(closing));
+      return { ...output, cursor: primary && !hidden ? pixels(primary.cursor, viewport) : null, gesture: this.state.kind };
     }
     const dt = this.lastTimestamp === null ? 60 : frame.timestamp - this.lastTimestamp;
     if (dt > 200 || (this.hands.length > 0 && frame.hands.length < this.hands.length)) this.reset(true);
     const alpha = 1 - Math.exp(-dt / 60);
-    const raw = frame.hands.slice(0, 2).map(hand => ({ palm: mirror(palmOf(hand)), cursor: mirror(hand[8]), ratio: pinchRatio(hand), width: Math.hypot(hand[5].x - hand[17].x, hand[5].y - hand[17].y, hand[5].z - hand[17].z), fist: isFist(hand) }));
+    const raw = frame.hands.slice(0, 2).map(hand => ({ palm: mirror(palmOf(hand)), cursor: mirror(hand[8]), ratio: pinchRatio(hand), width: Math.hypot(hand[5].x - hand[17].x, hand[5].y - hand[17].y, hand[5].z - hand[17].z), fist: isFist(hand), back: isBackPose(hand) }));
     let previous: (TrackedHand | undefined)[] = [...this.hands];
     const ambiguousArrival = previous.length === 1 && raw.length === 2
       && Math.abs(distance(previous[0]!.palm, raw[0].palm) - distance(previous[0]!.palm, raw[1].palm)) < 0.035;
@@ -94,6 +109,8 @@ export class HandGestureController {
       const confirmation = changing ? (old?.confirmation ?? 0) + 1 : 0;
       const fist = old?.fist ?? false;
       const fistConfirmation = hand.fist !== fist ? (old?.fistConfirmation ?? 0) + 1 : 0;
+      const back = old?.back ?? false;
+      const backConfirmation = hand.back !== back ? (old?.backConfirmation ?? 0) + 1 : 0;
       return {
         id: old?.id ?? this.nextId++,
         palm: old ? smooth(old.palm, hand.palm, alpha) : hand.palm,
@@ -103,6 +120,9 @@ export class HandGestureController {
         fist: fistConfirmation >= 2 ? !fist : fist,
         rawFist: hand.fist,
         fistConfirmation: fistConfirmation >= 2 ? 0 : fistConfirmation,
+        back: backConfirmation >= 2 ? !back : back,
+        rawBack: hand.back,
+        backConfirmation: backConfirmation >= 2 ? 0 : backConfirmation,
         rawRatio: hand.ratio,
         pinched: hand.fist ? false : confirmation >= 2 ? !pinched : pinched,
         confirmation: confirmation >= 2 ? 0 : confirmation,
@@ -112,11 +132,11 @@ export class HandGestureController {
     const activeId = 'hand' in this.state ? this.state.hand : null;
     const primary = this.hands.find(hand => hand.id === (activeId ?? this.primaryId)) ?? this.hands[0];
     this.primaryId = primary.id;
-    output.cursor = this.state.kind === 'aiming' && this.hands.some(hand => hand.rawFist || hand.rawRatio <= 0.25)
+    output.cursor = this.state.kind === 'back' || (this.state.kind === 'aiming' && this.hands.some(closing))
       ? null : pixels(primary.cursor, viewport);
     const pinched = this.hands.filter(hand => hand.pinched);
     if (this.state.kind === 'locked') {
-      this.state.releaseFrames = raw.every(hand => !hand.fist && hand.ratio >= 0.40) ? this.state.releaseFrames + 1 : 0;
+      this.state.releaseFrames = raw.every(hand => !hand.fist && !hand.back && hand.ratio >= 0.40) ? this.state.releaseFrames + 1 : 0;
       if (this.state.releaseFrames >= 2) this.state = { kind: 'aiming' };
       return { ...output, gesture: this.state.kind };
     }
@@ -139,7 +159,27 @@ export class HandGestureController {
       }
       return { ...output, gesture: this.state.kind };
     }
+    if (this.state.kind === 'back') {
+      const hand = this.hands.find(candidate => candidate.id === activeId);
+      if (!hand) {
+        this.state = { kind: 'locked', releaseFrames: 0 };
+        return { ...output, gesture: 'locked' };
+      }
+      if (!hand.back) {
+        this.state = { kind: 'aiming' };
+        return { ...output, gesture: 'aiming' };
+      }
+      const progress = Math.min(1, (frame.timestamp - this.state.startedAt) / this.backHoldMs);
+      if (progress < 1 || !hand.rawBack) return { ...output, gesture: 'back', progress };
+      this.state = { kind: 'locked', releaseFrames: 0 };
+      return { ...output, gesture: 'back', progress: 1, command: 'back' };
+    }
     if (this.hands.some(hand => hand.rawFist)) return { ...output, gesture: this.state.kind };
+    const back = this.state.kind === 'aiming' && pinched.length === 0 && this.hands.find(hand => hand.back && hand.rawBack);
+    if (back) {
+      this.state = { kind: 'back', hand: back.id, startedAt: frame.timestamp };
+      return { ...output, gesture: 'back' };
+    }
     if (this.state.kind === 'two-hand') {
       if (pinched.length !== 2) {
         this.state = { kind: 'locked', releaseFrames: 0 };

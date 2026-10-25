@@ -1,0 +1,268 @@
+{
+  "fixtures": [
+    {
+      "name": "hand-session-aim-2.json",
+      "label": "aim",
+      "attempts": 0,
+      "seconds": 5.5,
+      "frames": 112
+    },
+    {
+      "name": "hand-session-aim.json",
+      "label": "aim",
+      "attempts": 10,
+      "seconds": 28.1,
+      "frames": 563
+    },
+    {
+      "name": "hand-session-back-swipe.json",
+      "label": "back-swipe",
+      "attempts": 10,
+      "seconds": 19.1,
+      "frames": 382
+    },
+    {
+      "name": "hand-session-back-victory-1.json",
+      "label": "back-victory",
+      "attempts": 4,
+      "seconds": 30.7,
+      "frames": 614
+    },
+    {
+      "name": "hand-session-back-victory-2.json",
+      "label": "back-victory",
+      "attempts": 10,
+      "seconds": 30.9,
+      "frames": 619
+    },
+    {
+      "name": "hand-session-dwell.json",
+      "label": "dwell",
+      "attempts": 0,
+      "seconds": 10.2,
+      "frames": 205
+    },
+    {
+      "name": "hand-session-locked.json",
+      "label": "locked",
+      "attempts": 0,
+      "seconds": 18.4,
+      "frames": 369
+    },
+    {
+      "name": "hand-session-mixed.json",
+      "label": "mixed",
+      "attempts": 0,
+      "seconds": 46.4,
+      "frames": 928
+    },
+    {
+      "name": "hand-session-pan.json",
+      "label": "pan",
+      "attempts": 0,
+      "seconds": 10.3,
+      "frames": 207
+    },
+    {
+      "name": "hand-session-pinch-zoom-orbit.json",
+      "label": "pinch-zoom-orbit",
+      "attempts": 0,
+      "seconds": 9.6,
+      "frames": 193
+    },
+    {
+      "name": "hand-session-two-pinch.json",
+      "label": "two-pinch",
+      "attempts": 0,
+      "seconds": 12.3,
+      "frames": 246
+    }
+  ],
+  "negativeMinutes": 2.35,
+  "confusionFrames": {
+    "aim": {
+      "idle": 0,
+      "aiming": 650,
+      "pinch": 0,
+      "orbit": 0,
+      "zoom": 0,
+      "pan": 0,
+      "two-hand": 0,
+      "locked": 25,
+      "back": 0
+    },
+    "back-swipe": {
+      "idle": 0,
+      "aiming": 252,
+      "pinch": 0,
+      "orbit": 0,
+      "zoom": 0,
+      "pan": 0,
+      "two-hand": 0,
+      "locked": 130,
+      "back": 0
+    },
+    "back-victory": {
+      "idle": 0,
+      "aiming": 298,
+      "pinch": 0,
+      "orbit": 0,
+      "zoom": 0,
+      "pan": 0,
+      "two-hand": 0,
+      "locked": 704,
+      "back": 231
+    },
+    "dwell": {
+      "idle": 0,
+      "aiming": 205,
+      "pinch": 0,
+      "orbit": 0,
+      "zoom": 0,
+      "pan": 0,
+      "two-hand": 0,
+      "locked": 0,
+      "back": 0
+    },
+    "locked": {
+      "idle": 0,
+      "aiming": 260,
+      "pinch": 0,
+      "orbit": 0,
+      "zoom": 0,
+      "pan": 2,
+      "two-hand": 0,
+      "locked": 107,
+      "back": 0
+    },
+    "mixed": {
+      "idle": 0,
+      "aiming": 306,
+      "pinch": 7,
+      "orbit": 148,
+      "zoom": 2,
+      "pan": 105,
+      "two-hand": 198,
+      "locked": 162,
+      "back": 0
+    },
+    "pan": {
+      "idle": 0,
+      "aiming": 62,
+      "pinch": 2,
+      "orbit": 0,
+      "zoom": 2,
+      "pan": 141,
+      "two-hand": 0,
+      "locked": 0,
+      "back": 0
+    },
+    "pinch-zoom-orbit": {
+      "idle": 0,
+      "aiming": 59,
+      "pinch": 4,
+      "orbit": 130,
+      "zoom": 0,
+      "pan": 0,
+      "two-hand": 0,
+      "locked": 0,
+      "back": 0
+    },
+    "two-pinch": {
+      "idle": 0,
+      "aiming": 49,
+      "pinch": 1,
+      "orbit": 0,
+      "zoom": 0,
+      "pan": 0,
+      "two-hand": 190,
+      "locked": 6,
+      "back": 0
+    }
+  },
+  "rawBackPoseFrameShare": {
+    "aim": 0,
+    "back-swipe": 0,
+    "back-victory": 0.565,
+    "dwell": 0,
+    "locked": 0,
+    "mixed": 0,
+    "pan": 0,
+    "pinch-zoom-orbit": 0,
+    "two-pinch": 0
+  },
+  "victorySweep": [
+    {
+      "backHoldMs": 400,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.8421052631578947,
+      "commits": 16
+    },
+    {
+      "backHoldMs": 500,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.8421052631578947,
+      "commits": 16
+    },
+    {
+      "backHoldMs": 650,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.8421052631578947,
+      "commits": 16
+    },
+    {
+      "backHoldMs": 800,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.8421052631578947,
+      "commits": 16
+    },
+    {
+      "backHoldMs": 1000,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.7894736842105263,
+      "commits": 15
+    },
+    {
+      "backHoldMs": 1200,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.7894736842105263,
+      "commits": 15
+    }
+  ],
+  "swipeSweep": [
+    {
+      "distance": 0.1,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.9,
+      "triggers": 9
+    },
+    {
+      "distance": 0.15,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.8,
+      "triggers": 8
+    },
+    {
+      "distance": 0.2,
+      "falseTriggers": 0,
+      "falsePerMinute": 0,
+      "recall": 0.6,
+      "triggers": 6
+    }
+  ],
+  "victoryPoseHolds": 19,
+  "eligibleBackHoldMs": [
+    400,
+    500,
+    650,
+    800
+  ]
+}

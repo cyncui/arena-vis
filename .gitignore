@@ -36,3 +36,6 @@ Thumbs.db
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# recorded real-hand landmark clips stay local
+scripts/fixtures/hand-sessions/*.json

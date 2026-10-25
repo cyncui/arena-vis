@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import InterfaceIcon from './InterfaceIcon';
 import { HandTrackingSession } from '@/lib/hand-controls/session';
 import { createHandInteraction, type HandInteraction, type InteractionView } from '@/lib/hand-controls/interaction';
-import type { HandGesture, HandViewport, Landmark } from '@/lib/hand-controls/types';
+import type { HandFrame, HandGesture, HandViewport, Landmark } from '@/lib/hand-controls/types';
 
 type HandControlsPanelProps = {
   viewport: HandViewport;
@@ -14,14 +14,56 @@ type HandControlsPanelProps = {
 
 const connections = [[0, 1, 2, 3, 4], [0, 5, 6, 7, 8], [5, 9, 10, 11, 12], [9, 13, 14, 15, 16], [13, 17, 18, 19, 20], [0, 17]];
 const gestureLabels: Record<HandGesture, string> = {
-  idle: 'show an open hand inside the preview', aiming: 'hold the cursor over a node until the ring fills', pinch: 'move your pinch sideways to orbit or toward or away from the camera to zoom', zoom: 'toward camera to zoom in · away to zoom out · release to stop', pan: 'move your fist to pan · open to stop', orbit: 'move your pinch to orbit · release to stop', 'two-hand': 'move both pinches to pan · spread or bring together to zoom', locked: 'open all visible hands to resume',
+  idle: 'show an open hand inside the preview', aiming: 'hold the cursor over a node until the ring fills', pinch: 'move your pinch sideways to orbit or toward or away from the camera to zoom', zoom: 'toward camera to zoom in · away to zoom out · release to stop', pan: 'move your fist to pan · open to stop', orbit: 'move your pinch to orbit · release to stop', 'two-hand': 'move both pinches to pan · spread or bring together to zoom', locked: 'open all visible hands to resume', back: 'hold two fingers up to go back · open your hand to cancel',
 };
 const gestureTips: { label: string; instruction: string; gestures: HandGesture[] }[] = [
   { label: 'select', instruction: 'open hand · hover until the ring fills', gestures: ['aiming'] },
   { label: 'pan', instruction: 'fist · move sideways or up and down', gestures: ['pan'] },
   { label: 'orbit and zoom', instruction: 'pinch thumb and index · sideways to orbit · toward or away to zoom', gestures: ['pinch', 'orbit', 'zoom'] },
   { label: 'two hands', instruction: 'two pinches · move to pan, spread or close to zoom', gestures: ['two-hand'] },
+  { label: 'back', instruction: 'index and middle up · hold until the ring fills · open to cancel', gestures: ['back'] },
 ];
+const recordLabels = ['aim', 'dwell', 'pan', 'pinch-zoom-orbit', 'two-pinch', 'locked', 'back-victory', 'back-swipe', 'mixed'];
+
+type Clip = { phase: 'recording'; startedAt: number } | { phase: 'recorded'; startedAt: number; frames: HandFrame[] };
+const buttonClass = 'border border-white/20 px-2 py-1 text-[11px] text-white/80 hover:bg-white/10 disabled:opacity-40';
+
+function HandRecorder({ frames, viewport }: { frames: RefObject<HandFrame[] | null>; viewport: HandViewport }) {
+  const [label, setLabel] = useState(recordLabels[0]);
+  const [attempts, setAttempts] = useState(0);
+  const [clip, setClip] = useState<Clip | null>(null);
+  const recording = clip?.phase === 'recording';
+  useEffect(() => () => { frames.current = null; }, [frames]);
+  const toggle = () => {
+    const recorded = frames.current;
+    frames.current = recording ? null : [];
+    setClip(clip?.phase === 'recording' ? { phase: 'recorded', startedAt: clip.startedAt, frames: recorded ?? [] } : { phase: 'recording', startedAt: Date.now() });
+  };
+  const save = () => {
+    if (clip?.phase !== 'recorded') return;
+    const blob = new Blob([JSON.stringify({ version: 1, label, attempts, recordedAt: new Date(clip.startedAt).toISOString(), viewport, frames: clip.frames })], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `hand-session-${label}-${clip.startedAt}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const fieldClass = 'min-w-0 border border-white/20 bg-black px-1 py-1 text-white/80 disabled:opacity-40';
+  return (
+    <div className="mt-3 space-y-2 border-t border-white/10 pt-3 text-[11px]">
+      <div className="flex gap-2">
+        <label className="flex min-w-0 flex-1 flex-col gap-1">label<select value={label} disabled={recording} onChange={event => setLabel(event.target.value)} className={fieldClass}>{recordLabels.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+        <label className="flex w-20 flex-col gap-1">attempts<input type="number" min={0} value={attempts} onChange={event => setAttempts(Math.max(0, Math.floor(Number(event.target.value)) || 0))} className={fieldClass} /></label>
+      </div>
+      <div className="flex gap-2">
+        <button type="button" onClick={toggle} className={buttonClass}>{recording ? 'stop' : 'record'}</button>
+        <button type="button" disabled={clip?.phase !== 'recorded' || !clip.frames.length} onClick={save} className={buttonClass}>save{clip?.phase === 'recorded' ? ` ${clip.frames.length} frames` : ''}</button>
+      </div>
+      <p className="text-[10px] leading-relaxed text-white/45">recording is local and only when you save.</p>
+    </div>
+  );
+}
 
 export default function HandControlsPanel(props: HandControlsPanelProps) {
   const [open, setOpen] = useState(false);
@@ -31,6 +73,8 @@ export default function HandControlsPanel(props: HandControlsPanelProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const interaction = useRef<HandInteraction | null>(null);
   const latest = useRef(props);
+  const recording = useRef<HandFrame[] | null>(null);
+  const [recorder, setRecorder] = useState(false);
   const eligible = useRef(false);
   latest.current = props;
   eligible.current = props.viewport.width >= 768 && desktopInput;
@@ -69,6 +113,8 @@ export default function HandControlsPanel(props: HandControlsPanelProps) {
     }
   }, []);
 
+  useEffect(() => setRecorder(location.search.includes('record-hands')), []);
+
   useEffect(() => {
     const media = window.matchMedia('(pointer: fine)');
     const update = () => setDesktopInput(media.matches);
@@ -82,6 +128,7 @@ export default function HandControlsPanel(props: HandControlsPanelProps) {
       now: () => performance.now(),
       tracking: callbacks => new HandTrackingSession(video.current!, frame => {
         draw(frame.hands);
+        recording.current?.push({ timestamp: frame.timestamp, hands: frame.hands });
         callbacks.frame(frame);
       }, (state, message) => {
         if (state !== 'running') draw([]);
@@ -114,8 +161,9 @@ export default function HandControlsPanel(props: HandControlsPanelProps) {
         : gestureLabels.locked
     : gesture === 'aiming' && view.hand.phase === 'ready' && view.hand.target
       ? `hold over ${view.hand.target.name} until the ring fills`
-      : gestureLabels[gesture];
-  const buttonClass = 'border border-white/20 px-2 py-1 text-[11px] text-white/80 hover:bg-white/10 disabled:opacity-40';
+      : gesture === 'back' && view.hand.phase === 'ready'
+        ? view.hand.target ? `keep holding to go back to ${view.hand.target.name}` : 'nothing to go back to'
+        : gestureLabels[gesture];
 
   return (
     <>
@@ -138,6 +186,7 @@ export default function HandControlsPanel(props: HandControlsPanelProps) {
             {active && <button type="button" onClick={() => void interaction.current?.camera(state === 'paused' ? 'resume' : 'pause')} className={buttonClass}>{state === 'paused' ? 'resume' : 'pause'}</button>}
             {(active || state === 'starting') && <button type="button" onClick={() => void interaction.current?.camera('stop')} className={buttonClass}>stop camera</button>}
           </div>
+          {recorder && <HandRecorder frames={recording} viewport={props.viewport} />}
           <details className="mt-3 border-t border-white/10 pt-3 text-[11px] leading-relaxed">
             <summary className="cursor-pointer text-white/80 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#c1d8cc]">gesture reference</summary>
             <dl aria-label="hand gestures" className="mt-2 space-y-2">
