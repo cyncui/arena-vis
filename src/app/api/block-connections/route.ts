@@ -62,10 +62,19 @@ export async function GET(request: Request) {
       channelData: ch,
     }));
 
-    const links = picked.map((ch: any) => ({
-      source: `block-${blockId}`,
-      target: `channel-${ch.id}`,
-    }));
+    const links = [
+      ...picked.map((ch: any) => ({
+        source: `block-${blockId}`,
+        target: `channel-${ch.id}`,
+      })),
+      // Present channels still link as parents so a restored block reattaches; channel -> block keeps right-click pruning from removing them.
+      ...(data.data || [])
+        .filter((ch: any) => excludeIds.has(`channel-${ch.id}`))
+        .map((ch: any) => ({
+          source: `channel-${ch.id}`,
+          target: `block-${blockId}`,
+        })),
+    ];
 
     return Response.json({
       graphData: { nodes, links },

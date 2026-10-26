@@ -10,6 +10,7 @@ import { applyHandMotion, pickHandNode, type HandGraphHit, type HandGraphControl
 import type { GraphSurface, HandInteraction, NavigationIntent } from '@/lib/hand-controls/interaction';
 import { bindManualInput } from '@/lib/hand-controls/dom-input';
 import { selectionReducer, type SelectionAction } from '@/lib/selection-history';
+import { loadBookmarks, saveBookmarks, snapshotNode, toggleBookmark } from '@/lib/bookmarks';
 
 import * as THREE from 'three';
 
@@ -100,6 +101,22 @@ function getLinkKey(link: GraphLink): string {
   return `${s}__${t}`;
 }
 
+// Routes link the same block and channel in either direction, so merges dedupe by endpoint pair.
+// Links to nodes missing from the result are dropped because force-graph throws on them, e.g. a channel pruned mid-fetch.
+function mergeGraph(prev: GraphData, incoming: GraphData): GraphData {
+  const pairKey = (link: GraphLink) => getLinkKey(link).split('__').sort().join('__');
+  const existingNodeIds = new Set(prev.nodes.map(n => n.id));
+  const newNodes = incoming.nodes.filter(n => !existingNodeIds.has(n.id));
+  const nodeIds = new Set([...existingNodeIds, ...newNodes.map(n => n.id)]);
+  const existingLinks = new Set(prev.links.map(pairKey));
+  const newLinks = incoming.links.filter(link => {
+    const [s, t] = getLinkKey(link).split('__');
+    return nodeIds.has(s) && nodeIds.has(t) && !existingLinks.has(pairKey(link));
+  });
+  if (newNodes.length === 0 && newLinks.length === 0) return prev;
+  return { nodes: [...prev.nodes, ...newNodes], links: [...prev.links, ...newLinks] };
+}
+
 const clusterPalette = ['#b8a7d4', '#8fb7b0', '#cfb38e', '#a4afc9'];
 const selectedParticleColor = '#fff0cf';
 
@@ -150,6 +167,8 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   const [exploredBlocks, setExploredBlocks] = useState<Set<string>>(new Set());
   const [sidebarMinimized, setSidebarMinimized] = useState(false);
   const [historyCollapsed, setHistoryCollapsed] = useState(true);
+  const [bookmarks, setBookmarks] = useState(loadBookmarks<GraphNode>);
+  const [bookmarksCollapsed, setBookmarksCollapsed] = useState(true);
   const [exploring, setExploring] = useState(false);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [handHoveredNodeName, setHandHoveredNodeName] = useState<string | null>(null);
@@ -199,6 +218,8 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
   }, [graphData, nodeColors, selectedNode]);
 
   useEffect(() => { selectedNodeRef.current = selectedNode; }, [selectedNode]);
+
+  useEffect(() => saveBookmarks(bookmarks), [bookmarks]);
 
   useEffect(() => {
     if (!interaction || !graphElement.current) return;
@@ -448,19 +469,7 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         const data = await res.json();
 
         if (res.ok && data.graphData) {
-          setGraphData(prev => {
-            if (!prev) return data.graphData;
-
-            const existingNodeIds = new Set(prev.nodes.map(n => n.id));
-            const newNodes = data.graphData.nodes.filter((n: GraphNode) => !existingNodeIds.has(n.id));
-            const existingLinks = new Set(prev.links.map(getLinkKey));
-            const newLinks = data.graphData.links.filter((l: GraphLink) => !existingLinks.has(getLinkKey(l)));
-
-            return {
-              nodes: [...prev.nodes, ...newNodes],
-              links: [...prev.links, ...newLinks],
-            };
-          });
+          setGraphData(prev => prev ? mergeGraph(prev, data.graphData) : data.graphData);
         }
       } else {
         const blockId = node.id.replace('block-', '');
@@ -470,25 +479,11 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
         const data = await res.json();
 
         if (res.ok && data.graphData) {
-          if (data.allExplored) {
+          if (data.allExplored || data.graphData.nodes.length === 0) {
             setExploredBlocks(prev => new Set(prev).add(graphNode.id));
           }
 
-          if (data.graphData.nodes.length > 0) {
-            setGraphData(prev => {
-              if (!prev) return prev;
-              const existing = new Set(prev.nodes.map(n => n.id));
-              const newNodes = data.graphData.nodes.filter((n: GraphNode) => !existing.has(n.id));
-              const existingLinks = new Set(prev.links.map(getLinkKey));
-              const newLinks = data.graphData.links.filter((l: GraphLink) => !existingLinks.has(getLinkKey(l)));
-              return {
-                nodes: [...prev.nodes, ...newNodes],
-                links: [...prev.links, ...newLinks],
-              };
-            });
-          } else {
-            setExploredBlocks(prev => new Set(prev).add(graphNode.id));
-          }
+          setGraphData(prev => prev && mergeGraph(prev, data.graphData));
         }
       }
     } catch (err) {
@@ -499,6 +494,15 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
       setExploring(false);
     }
   }, [selectNode]);
+
+  // A bookmarked node may have been pruned or come from another graph, so its snapshot goes back in before expanding.
+  const respawn = (bookmark: GraphNode) => {
+    setBookmarksCollapsed(true);
+    const existing = graphDataRef.current?.nodes.find(n => n.id === bookmark.id);
+    const node = existing ?? snapshotNode(bookmark);
+    if (!existing) setGraphData(data => mergeGraph(data ?? { nodes: [], links: [] }, { nodes: [node], links: [] }));
+    void handleNodeClick(node);
+  };
 
   const handleNodeRightClick = useCallback((node: any, event: MouseEvent) => {
     event.preventDefault();
@@ -811,6 +815,38 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
     </div>
   );
 
+  const selectedBookmarked = !!selectedNode && bookmarks.some(node => node.id === selectedNode.id);
+
+  const bookmarkList = bookmarks.length > 0 && (
+    <div className="px-3 pt-2 pb-2 border-b border-white/10">
+      <button
+        onClick={() => setBookmarksCollapsed(c => !c)}
+        aria-expanded={!bookmarksCollapsed}
+        className="text-white/40 hover:text-white/60 text-[10px] uppercase tracking-wider mb-1.5 font-sans flex items-center gap-1 transition-colors"
+      >
+        <InterfaceIcon name="chevron-down" className="transition-transform" style={{ transform: bookmarksCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)' }} />
+        Bookmarks ({bookmarks.length})
+      </button>
+      {!bookmarksCollapsed && (
+        <div className="flex flex-wrap gap-1 items-center">
+          {bookmarks.map(node => (
+            <button
+              key={node.id}
+              onClick={() => respawn(node)}
+              disabled={node.id === selectedNode?.id}
+              className="text-sm px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/15 disabled:bg-white/15 disabled:cursor-default transition-colors flex items-center gap-1 max-w-[140px] font-pixel"
+              style={{ color: nodeColors.get(node.id) || clusterPalette[0] }}
+              title={node.name}
+            >
+              <InterfaceIcon name={node.type === 'channel' ? 'channel' : 'block'} />
+              <span className="min-w-0 truncate">{node.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   const backButton = history.length > 0 && (
     <button
       onClick={() => restoreSelection({ type: 'back' })}
@@ -871,10 +907,11 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
           <div role="alert" className="text-red-400 text-sm font-pixel">{error}</div>
         )}
 
-        {!selectedNode && history.length > 0 && (
+        {!selectedNode && !loading && (history.length > 0 || bookmarks.length > 0) && (
           <div className="w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-8rem)] overflow-y-auto custom-scrollbar bg-black/50 border border-white/20 rounded-sm backdrop-blur-sm flex flex-col transition-all">
             {pathTrail}
-            <div className="px-4 pt-3 pb-1">{backButton}</div>
+            {bookmarkList}
+            {backButton && <div className="px-4 pt-3 pb-1">{backButton}</div>}
           </div>
         )}
 
@@ -890,12 +927,21 @@ export default function Arena3D({ initialSlug }: Arena3DProps) {
                 <InterfaceIcon name={selectedNode.type === 'channel' ? 'channel' : 'block'} />
                 {selectedNode.name.substring(0, 25)}{selectedNode.name.length > 25 ? '…' : ''}
               </button>
-           
+              <button
+                onClick={() => setBookmarks(list => toggleBookmark(list, selectedNode))}
+                aria-pressed={selectedBookmarked}
+                aria-label={selectedBookmarked ? 'remove bookmark' : 'bookmark'}
+                title={selectedBookmarked ? 'remove bookmark' : 'bookmark this spot'}
+                className={`p-1 -m-1 transition-colors ${selectedBookmarked ? 'text-[#e9dfc4] hover:text-white' : 'text-white/40 hover:text-white'}`}
+              >
+                <InterfaceIcon name="star" className={selectedBookmarked ? 'fill-current' : ''} />
+              </button>
             </div>
 
             {!sidebarMinimized && (
               <>
                 {pathTrail}
+                {bookmarkList}
 
                 <div className="p-4">
                   {backButton}
